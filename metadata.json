@@ -1,0 +1,8 @@
+{
+  "name": "象棋麻將激鬥(多人版)",
+  "description": "Using socket.io",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "prompt": ""
+}
