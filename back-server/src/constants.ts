@@ -141,6 +141,9 @@ export const AI_NAME_PREFIX = "電腦 ";
 export const LOBBY_ROOM_NAME = 'lobby';
 /** @description 遊戲訊息記錄的最大條數。 */
 export const MAX_MESSAGE_LOG_ENTRIES = 50;
+/** @description 預設的日誌記錄目錄路徑。 */
+export const DEFAULT_LOG_DIRECTORY = "C:/Users/lnp89/Downloads/mut-xiangqi-mahjong-log";
+
 
 // --- 牌面台語/中文發音 (供音效使用，前端已定義，此處為伺服器端參考) ---
 // TAIWANESE_HOKKIEN_TILE_NAMES is primarily for client-side audio.

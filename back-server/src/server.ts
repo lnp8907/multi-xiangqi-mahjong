@@ -1,4 +1,9 @@
 
+// 引入 logger.ts 以啟用檔案日誌記錄並覆寫 console 方法
+// 必須將此 import 放在所有其他 import 和程式碼之前，
+// 特別是那些可能使用 console 的程式碼。
+import './logger';
+
 // 引入 Node.js http 模組用於創建 HTTP 伺服器
 import { createServer } from 'http';
 // 引入 Socket.IO Server 類別及相關類型
@@ -181,6 +186,7 @@ httpServer.listen(SERVER_PORT, () => {
       });
       console.log('[Server] 所有遊戲房間已清理。');
       // 退出 Node.js 程序
+      // logger.ts 中的 process.on('exit', closeLogStream) 會在此處之前被觸發
       (process as any).exit(0);
     });
   });

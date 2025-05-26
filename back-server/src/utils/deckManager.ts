@@ -16,6 +16,33 @@ export const createInitialDeck = (): Tile[] => {
       });
     }
   });
+
+  // --- BEGIN ADDED LOGGING ---
+  // 日誌：開始驗證初始牌堆的牌數量
+  console.log(`[DeckManager] createInitialDeck: 完整牌堆已創建。開始驗證牌的數量...`);
+  const counts = new Map<TileKind, number>(); // 用於計數的 Map
+  deck.forEach(tile => { // 遍歷牌堆中的每張牌
+    counts.set(tile.kind, (counts.get(tile.kind) || 0) + 1); // 對每種牌進行計數
+  });
+
+  let countsCorrect = true; // 標記牌數量是否全部正確
+  PLAYABLE_TILE_KINDS.forEach(kind => { // 遍歷所有可玩的牌種
+    const count = counts.get(kind) || 0; // 獲取該牌種的計數
+    if (count !== TILES_PER_KIND) { // 如果計數不等於預期的每種牌的數量
+      // 錯誤日誌：記錄牌種、實際數量和預期數量
+      console.error(`[DeckManager] 錯誤於 createInitialDeck: 牌種 ${kind} 的數量為 ${count}，應為 ${TILES_PER_KIND}。`);
+      countsCorrect = false; // 標記為不正確
+    }
+  });
+
+  if (countsCorrect) { // 如果所有牌的數量都正確
+    // 日誌：確認所有牌的數量正確，並記錄總牌數
+    console.log(`[DeckManager] createInitialDeck: 所有牌的數量已驗證正確 (${TILES_PER_KIND} 張/種)。總牌數: ${deck.length}`);
+  } else { // 如果有牌的數量不正確
+    // 錯誤日誌：牌數量驗證失敗
+    console.error(`[DeckManager] createInitialDeck: 牌數量驗證失敗。`);
+  }
+  // --- END ADDED LOGGING ---
   return deck; // 返回創建好的完整牌堆
 };
 

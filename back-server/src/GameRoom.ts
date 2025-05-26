@@ -14,7 +14,9 @@ import {
     MAX_HAND_SIZE_BEFORE_DISCARD, ACTION_TIMER_INTERVAL_MS, EMPTY_ROOM_TIMEOUT_MS, GAME_END_EMPTY_ROOM_TIMEOUT_MS,
     TILE_KIND_DETAILS, MAX_MESSAGE_LOG_ENTRIES, AI_NAME_PREFIX, DEFAULT_NUMBER_OF_ROUNDS,
     // Fix: Import LOBBY_ROOM_NAME
-    LOBBY_ROOM_NAME
+    LOBBY_ROOM_NAME,
+    PLAYABLE_TILE_KINDS, // 引入可玩牌種用於日誌驗證
+    TILES_PER_KIND // 引入每種牌的預期數量用於日誌驗證
 } from './constants';
 // 引入牌堆管理相關輔助函數
 import { createInitialDeck, shuffleDeck, dealTiles, sortHandVisually } from './utils/deckManager';
@@ -201,7 +203,68 @@ export class GameRoom {
         p.hand = sortHandVisually(hands[p.id]); // 手牌排序後存入
     });
     this.gameState.deck = remainingDeck; // 更新剩餘牌堆
-    this.updateGameStatePlayers(); // 再次更新 gameState.players 以包含手牌
+
+    // --- BEGIN ADDED LOGGING ---
+    // 日誌：發牌完成，開始驗證手牌與剩餘牌堆
+    this.addLog("發牌完成。驗證手牌與剩餘牌堆...");
+    console.log(`[GameRoom ${this.roomId}] 第 ${this.gameState.currentRound} 局 - 發牌後驗證:`);
+    const overallCounts = new Map<TileKind, number>(); // 用於統計所有牌（手牌+牌堆）中每種牌的總數
+
+    this.players.forEach(p => { // 遍歷每個玩家
+        // 日誌：記錄玩家ID、名稱及其手牌數量
+        console.log(`  玩家 ${p.id} (${p.name}) 手牌 (${p.hand.length} 張):`);
+        const handCounts = new Map<TileKind, number>(); // 用於統計該玩家手牌中每種牌的數量
+        p.hand.forEach(tile => { // 遍歷玩家的每張手牌
+            handCounts.set(tile.kind, (handCounts.get(tile.kind) || 0) + 1); // 統計手牌中牌的種類和數量
+            overallCounts.set(tile.kind, (overallCounts.get(tile.kind) || 0) + 1); // 同時更新總計數
+        });
+        handCounts.forEach((count, kind) => { // 遍歷手牌計數結果
+            // 日誌：記錄手牌中每種牌的種類和數量
+            console.log(`    ${kind}: ${count}`);
+            if (count > TILES_PER_KIND) { // 如果某種牌的數量超過了預期（TILES_PER_KIND，通常為4）
+                // 嚴重錯誤日誌：記錄玩家ID、牌種和實際數量
+                console.error(`    !!!! 嚴重錯誤 !!!! 玩家 ${p.id} 手牌中出現 ${count} 張 ${kind}！`);
+                this.addLog(`嚴重錯誤：玩家 ${p.name} 手牌中出現 ${count} 張 ${kind}！`);
+            }
+        });
+    });
+
+    // 日誌：記錄剩餘牌堆的牌數
+    console.log(`  剩餘牌堆 (${this.gameState.deck.length} 張):`);
+    const deckCounts = new Map<TileKind, number>(); // 用於統計剩餘牌堆中每種牌的數量
+    this.gameState.deck.forEach(tile => { // 遍歷剩餘牌堆中的每張牌
+        deckCounts.set(tile.kind, (deckCounts.get(tile.kind) || 0) + 1); // 統計牌堆中牌的種類和數量
+        overallCounts.set(tile.kind, (overallCounts.get(tile.kind) || 0) + 1); // 更新總計數
+    });
+    deckCounts.forEach((count, kind) => { // 遍歷牌堆計數結果
+        // 日誌：記錄牌堆中每種牌的種類和數量
+        console.log(`    ${kind}: ${count}`);
+    });
+
+    // 日誌：開始驗證遊戲中所有牌的總數
+    console.log(`  遊戲中各種牌的總數 (手牌 + 牌堆):`);
+    let allOverallCountsCorrect = true; // 標記總數是否全部正確
+    PLAYABLE_TILE_KINDS.forEach(kind => { // 遍歷所有可玩的牌種
+        const totalCount = overallCounts.get(kind) || 0; // 獲取該牌種的總計數
+        // 日誌：記錄每種牌的總數
+        console.log(`    ${kind}: ${totalCount}`);
+        if (totalCount !== TILES_PER_KIND) { // 如果總數不等於預期（TILES_PER_KIND）
+            // 嚴重錯誤日誌：記錄牌種、實際總數和預期總數
+            console.error(`    !!!! 嚴重錯誤 !!!! ${kind} 的總數為 ${totalCount}，應為 ${TILES_PER_KIND}。`);
+            this.addLog(`嚴重錯誤：遊戲中 ${kind} 總數為 ${totalCount}，應為 ${TILES_PER_KIND}！`);
+            allOverallCountsCorrect = false; // 標記為不正確
+        }
+    });
+    if (allOverallCountsCorrect) { // 如果所有牌的總數都正確
+        // 日誌：確認總數正確
+        console.log(`  所有牌的總數已驗證正確。`);
+    } else { // 如果有牌的總數不正確
+        // 錯誤日誌：總數驗證失敗
+        console.error(`  所有牌的總數驗證失敗。`);
+    }
+    // --- END ADDED LOGGING ---
+
+    this.updateGameStatePlayers(); // 再次更新 gameState.players 以包含手牌和日誌驗證後的狀態
 
     // 設定初始回合玩家為莊家
     this.gameState.currentPlayerIndex = this.gameState.dealerIndex; 
@@ -235,7 +298,7 @@ export class GameRoom {
 
   /**
    * @description 初始化AI玩家以填補空位。
-   *              此函數現在更通用，會根據當前房間內真人玩家數量和 NUM_PLAYERS 來決定需要多少AI。
+   *              此函數現在更通用，會根據當前房間内真人玩家數量和 NUM_PLAYERS 來決定需要多少AI。
    */
   private initializeAIPlayers(): void {
     const currentHumanPlayersCount = this.players.filter(p => p.isHuman).length; // 計算已有的真人玩家數 (無論是否在線)
