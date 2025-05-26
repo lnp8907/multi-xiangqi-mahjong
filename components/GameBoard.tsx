@@ -218,7 +218,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     const previousLDT = prevLastDrawnTileRef.current; // 上一次摸到的牌 (記錄用)
     // 當前客戶端是否為真人玩家且輪到其行動
     const humanPlayerIsCurrent = humanPlayer && currentPlayer?.id === humanPlayer.id;
-    // 是否為莊家第一回合 (已發8張牌，等待打出第一張)
+    // 是否為莊家第一回合 (已發8張牌，等待打出第一張牌)
     const isDealerInitialTurn = currentPlayer?.isDealer && 
                                 gameState.turnNumber === 1 && 
                                 gameState.players.length > 0 && 
@@ -230,9 +230,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
         (gameState.gamePhase === GamePhase.AWAITING_DISCARD && isDealerInitialTurn) ); // 莊家開局等待打牌
 
     if (shouldConsiderAutoSelect) {
-      // 如果摸到的牌發生了顯著變化 (例如，從無到有，或ID不同)，或者目前沒有選中的牌
+      // 如果摸到的牌發生了顯著變化 (例如，從無到有，或ID不同)
       const ldtHasChangedSignificantly = (!previousLDT && currentLDT) || (previousLDT && currentLDT && previousLDT.id !== currentLDT.id);
-      if (ldtHasChangedSignificantly || selectedTileId === null) {
+      if (ldtHasChangedSignificantly) { // 移除了 `|| selectedTileId === null` 條件
          setSelectedTileId(currentLDT!.id); // 自動選中剛摸到的牌
       }
     }
@@ -279,7 +279,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
    * @param {Tile} tile - 被點擊的牌。
    */
   const handleTileClick = useCallback((tile: Tile) => {
-    // 僅當是真人玩家的回合，且遊戲階段允許選擇手牌時有效
+    // 僅当是真人玩家的回合，且遊戲階段允許選擇手牌時有效
     if (humanPlayer && currentPlayer?.id === humanPlayer.id && gameState.players.find(p => p.id === humanPlayer.id)?.isHuman) {
         if (gameState.gamePhase === GamePhase.PLAYER_DRAWN || gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
             // 點擊已選中的牌則取消選中，否則選中該牌
@@ -889,7 +889,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
         isOpen={ // 彈窗開啟條件
             isSelectingChiCombo && // 本地狀態控制是否嘗試開啟
             gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION && // 伺服器等待此玩家做宣告決定
-            // Fix: Correct typo from playerMakingClaimDecision to playerMakingDecision
+            // Fix: Correct typo from playerMakingClaimDecision to playerMakingClaimDecision
             playerMakingDecision?.id === clientPlayerId && // 確實是此客戶端在做決定
             Array.isArray(gameState.chiOptions) && gameState.chiOptions.length > 0 && // 伺服器提供了可吃的選項
             !!gameState.lastDiscardedTile // 有棄牌可吃
