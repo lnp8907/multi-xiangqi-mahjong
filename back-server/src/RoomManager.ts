@@ -82,10 +82,10 @@ export class RoomManager {
     const gameRoom = new GameRoom(roomId, fullRoomSettings, this.io, () => this.removeRoom(roomId));
     this.rooms.set(roomId, gameRoom); // 將房間加入到管理列表
 
-    console.log(`[RoomManager] 玩家 ${hostNameFromClient} (Socket: ${socket.id}) 創建房間: ${fullRoomSettings.roomName} (ID: ${roomId})`);
+    console.info(`[RoomManager] 玩家 ${hostNameFromClient} (Socket: ${socket.id}) 創建房間: ${fullRoomSettings.roomName} (ID: ${roomId})`); // Log level adjusted
     
     socket.leave(LOBBY_ROOM_NAME); // 讓創建者離開大廳
-    console.log(`[RoomManager] Socket ${socket.id} 已離開 '${LOBBY_ROOM_NAME}' 群組，加入遊戲房間 ${roomId}。`);
+    console.info(`[RoomManager] Socket ${socket.id} 已離開 '${LOBBY_ROOM_NAME}' 群組，加入遊戲房間 ${roomId}。`); // Log level adjusted
     // 將房主加入到新創建的遊戲房間
     const addSuccess = gameRoom.addPlayer(socket, hostNameFromClient, true); // isHost = true
 
@@ -140,10 +140,10 @@ export class RoomManager {
         return;
     }
 
-    console.log(`[RoomManager] 玩家 ${playerName} (Socket: ${socket.id}) 嘗試加入房間: ${room.getSettings().roomName} (ID: ${data.roomId})`);
+    console.info(`[RoomManager] 玩家 ${playerName} (Socket: ${socket.id}) 嘗試加入房間: ${room.getSettings().roomName} (ID: ${data.roomId})`); // Log level adjusted
     
     socket.leave(LOBBY_ROOM_NAME); // 讓玩家離開大廳
-    console.log(`[RoomManager] Socket ${socket.id} 已離開 '${LOBBY_ROOM_NAME}' 群組，準備加入遊戲房間 ${data.roomId}。`);
+    console.info(`[RoomManager] Socket ${socket.id} 已離開 '${LOBBY_ROOM_NAME}' 群組，準備加入遊戲房間 ${data.roomId}。`); // Log level adjusted
     // 嘗試將玩家加入到遊戲房間
     const successfullyAdded = room.addPlayer(socket, playerName, false); // isHost = false
 
@@ -152,7 +152,7 @@ export class RoomManager {
         this.broadcastLobbyUpdate(); // 廣播大廳房間列表更新
     } else { // 如果加入失敗
         socket.join(LOBBY_ROOM_NAME); // 讓玩家重新加入大廳
-        console.log(`[RoomManager] Socket ${socket.id} 加入遊戲房間 ${data.roomId} 失敗，已重新加入 '${LOBBY_ROOM_NAME}' 群組。`);
+        console.warn(`[RoomManager] Socket ${socket.id} 加入遊戲房間 ${data.roomId} 失敗，已重新加入 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
         callback({ success: false, message: '無法加入房間，可能已滿員或發生錯誤。'});
     }
   }
@@ -166,10 +166,10 @@ export class RoomManager {
     const room = this.rooms.get(roomId); // 查找房間
     if (room) { // 如果房間存在
       const playerName = socket.data.playerName || `Socket ${socket.id}`;
-      console.log(`[RoomManager] 玩家 ${playerName} 請求離開房間: ${roomId}`);
+      console.info(`[RoomManager] 玩家 ${playerName} 請求離開房間: ${roomId}`); // Log level adjusted
       room.removePlayer(socket.id); // 從遊戲房間移除玩家
       socket.join(LOBBY_ROOM_NAME); // 讓玩家加入大廳
-      console.log(`[RoomManager] Socket ${socket.id} 已重新加入 '${LOBBY_ROOM_NAME}' 群組。`);
+      console.info(`[RoomManager] Socket ${socket.id} 已重新加入 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
       this.broadcastLobbyUpdate(); // 廣播大廳更新
     }
   }
@@ -184,13 +184,13 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (room && room.hasPlayer(socket.id)) { // 如果房間存在且玩家確實屬於該房間
             const playerName = socket.data.playerName || `Socket ${socket.id}`;
-            console.log(`[RoomManager] 偵測到玩家 ${playerName} (Socket: ${socket.id}) 斷線，將從房間 ${room.getSettings().roomName} 處理。`);
+            console.info(`[RoomManager] 偵測到玩家 ${playerName} (Socket: ${socket.id}) 斷線，將從房間 ${room.getSettings().roomName} 處理。`); // Log level adjusted
             room.removePlayer(socket.id); // 從遊戲房間移除玩家 (GameRoom內部會處理離線邏輯)
             this.broadcastLobbyUpdate(); // 廣播大廳更新
         }
     } else { // 如果玩家斷線時不在任何遊戲房間內 (可能在大廳)
         socket.leave(LOBBY_ROOM_NAME); // 確保其離開大廳 (以防萬一)
-        console.log(`[RoomManager] 玩家 ${socket.data.playerName || socket.id} 斷線，但未加入任何房間。已確保其離開 '${LOBBY_ROOM_NAME}' 群組。`);
+        console.info(`[RoomManager] 玩家 ${socket.data.playerName || socket.id} 斷線，但未加入任何房間。已確保其離開 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
     }
   }
 
@@ -235,7 +235,7 @@ export class RoomManager {
     const clientsInLobby = this.io.sockets.adapter.rooms.get(LOBBY_ROOM_NAME); // 獲取大廳內的客戶端
     const numClientsInLobby = clientsInLobby ? clientsInLobby.size : 0; // 大廳客戶端數量
     this.io.to(LOBBY_ROOM_NAME).emit('lobbyRoomList', this.getLobbyRoomsData()); // 廣播房間列表
-    console.log(`[RoomManager] 已廣播房間列表更新至 '${LOBBY_ROOM_NAME}' 群組 (${numClientsInLobby} 個客戶端)。`);
+    console.info(`[RoomManager] 已廣播房間列表更新至 '${LOBBY_ROOM_NAME}' 群組 (${numClientsInLobby} 個客戶端)。`); // Log level adjusted
   }
 
   /**
@@ -248,7 +248,7 @@ export class RoomManager {
         const roomName = room.getSettings().roomName;
         room.destroy(); // 銷毀遊戲房間內部狀態 (例如計時器)
         this.rooms.delete(roomId); // 從管理列表中移除
-        console.log(`[RoomManager] 房間 ${roomName} (ID: ${roomId}) 已被移除並銷毀。`);
+        console.info(`[RoomManager] 房間 ${roomName} (ID: ${roomId}) 已被移除並銷毀。`); // Log level adjusted
         this.broadcastLobbyUpdate(); // 廣播大廳更新
     }
   }
@@ -281,6 +281,6 @@ export class RoomManager {
         type: 'player' // 訊息類型為玩家訊息
     };
     this.io.to(LOBBY_ROOM_NAME).emit('lobbyChatMessage', chatMessage); // 向大廳廣播聊天訊息
-    console.log(`[LobbyChat] ${playerName}: ${messageText} (發送到 '${LOBBY_ROOM_NAME}' 群組)`);
+    console.debug(`[LobbyChat] ${playerName}: ${messageText} (發送到 '${LOBBY_ROOM_NAME}' 群組)`); // Log level adjusted
   }
 }

@@ -1,4 +1,5 @@
 
+
 import { Tile, TileKind, Player, Suit } from '../types'; // 引入類型定義
 import { PLAYABLE_TILE_KINDS, TILES_PER_KIND, TILE_KIND_DETAILS } from '../constants'; // 引入常數
 
@@ -17,9 +18,9 @@ export const createInitialDeck = (): Tile[] => {
     }
   });
 
-  // --- BEGIN ADDED LOGGING ---
+  // --- BEGIN Log Level Adjustment ---
   // 日誌：開始驗證初始牌堆的牌數量
-  console.log(`[DeckManager] createInitialDeck: 完整牌堆已創建。開始驗證牌的數量...`);
+  console.debug(`[DeckManager] createInitialDeck: 完整牌堆已創建。開始驗證牌的數量...`); 
   const counts = new Map<TileKind, number>(); // 用於計數的 Map
   deck.forEach(tile => { // 遍歷牌堆中的每張牌
     counts.set(tile.kind, (counts.get(tile.kind) || 0) + 1); // 對每種牌進行計數
@@ -30,19 +31,19 @@ export const createInitialDeck = (): Tile[] => {
     const count = counts.get(kind) || 0; // 獲取該牌種的計數
     if (count !== TILES_PER_KIND) { // 如果計數不等於預期的每種牌的數量
       // 錯誤日誌：記錄牌種、實際數量和預期數量
-      console.error(`[DeckManager] 錯誤於 createInitialDeck: 牌種 ${kind} 的數量為 ${count}，應為 ${TILES_PER_KIND}。`);
+      console.error(`[DeckManager] 錯誤於 createInitialDeck: 牌種 ${kind} 的數量為 ${count}，應為 ${TILES_PER_KIND}。`); 
       countsCorrect = false; // 標記為不正確
     }
   });
 
   if (countsCorrect) { // 如果所有牌的數量都正確
     // 日誌：確認所有牌的數量正確，並記錄總牌數
-    console.log(`[DeckManager] createInitialDeck: 所有牌的數量已驗證正確 (${TILES_PER_KIND} 張/種)。總牌數: ${deck.length}`);
+    console.debug(`[DeckManager] createInitialDeck: 所有牌的數量已驗證正確 (${TILES_PER_KIND} 張/種)。總牌數: ${deck.length}`); 
   } else { // 如果有牌的數量不正確
-    // 錯誤日誌：牌數量驗證失敗
-    console.error(`[DeckManager] createInitialDeck: 牌數量驗證失敗。`);
+    // 錯誤日誌：牌數量驗證失敗 (上面的 console.error 已包含具體錯誤，此處可省略或改為 WARN)
+    // console.error(`[DeckManager] createInitialDeck: 牌數量驗證失敗。`); 
   }
-  // --- END ADDED LOGGING ---
+  // --- END Log Level Adjustment ---
   return deck; // 返回創建好的完整牌堆
 };
 

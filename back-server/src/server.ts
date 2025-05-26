@@ -13,7 +13,6 @@ import { RoomManager } from './RoomManager';
 // 引入類型定義
 import { ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData, ChatMessage, GameActionPayload } from './types';
 // 引入常數
-// Fix: Import DEFAULT_HOST_NAME
 import { SERVER_PORT, MAX_PLAYER_NAME_LENGTH, SYSTEM_SENDER_NAME, DEFAULT_PLAYER_NAME, LOBBY_ROOM_NAME, DEFAULT_HOST_NAME } from './constants';
 
 // 創建 HTTP 伺服器實例
@@ -31,12 +30,12 @@ const roomManager = new RoomManager(io);
 
 // 監聽新的 Socket 連接事件
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>) => {
-  console.log(`[Server] 新的連接: ${socket.id}`);
-  
+  console.info(`[Server] 新的連接: ${socket.id}`); // Log level adjusted
+
   // 從連接查詢參數中獲取初始玩家名稱，並存儲在 socket.data 中
   // 這允許客戶端在建立連接時就傳遞一個預設名稱
   const initialNameFromQuery = socket.handshake.query.playerName;
-  socket.data.playerName = Array.isArray(initialNameFromQuery) 
+  socket.data.playerName = Array.isArray(initialNameFromQuery)
     ? initialNameFromQuery[0] // 如果是陣列，取第一個
     : initialNameFromQuery || `${DEFAULT_PLAYER_NAME}${Math.floor(Math.random() * 10000)}`; // 否則使用查詢參數或生成隨機名稱
 
@@ -48,7 +47,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
     if (trimmedName && trimmedName.length > 0 && trimmedName.length <= MAX_PLAYER_NAME_LENGTH) {
       socket.data.playerName = trimmedName; // 更新 socket.data 中的玩家名稱
       socket.join(LOBBY_ROOM_NAME); // 讓此 socket 加入 'lobby' 群組 (房間)
-      console.log(`[Server] Socket ${socket.id} (${socket.data.playerName}) 設定名稱並已加入 '${LOBBY_ROOM_NAME}' 群組。`);
+      console.info(`[Server] Socket ${socket.id} (${socket.data.playerName}) 設定名稱並已加入 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
       if(callback) callback({ success: true }); // 回調客戶端告知成功
       // 向剛設定完名稱並加入大廳的此客戶端發送當前的房間列表
       socket.emit('lobbyRoomList', roomManager.getLobbyRoomsData());
@@ -83,7 +82,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
     if (socket.rooms.has(LOBBY_ROOM_NAME)) {
         socket.emit('lobbyRoomList', roomManager.getLobbyRoomsData());
     } else { // 如果因某些原因客戶端不在 'lobby' 群組
-        console.warn(`[Server] Socket ${socket.id} 請求大廳房間列表但不在 '${LOBBY_ROOM_NAME}' 群組。強制加入後發送。`);
+        console.warn(`[Server] Socket ${socket.id} 請求大廳房間列表但不在 '${LOBBY_ROOM_NAME}' 群組。強制加入後發送。`); // Kept as console.warn
         socket.join(LOBBY_ROOM_NAME); // 強制加入
         socket.emit('lobbyRoomList', roomManager.getLobbyRoomsData()); // 發送列表
     }
@@ -101,7 +100,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
         roomManager.leaveRoom(socket, socket.data.currentRoomId);
     }
     socket.leave(LOBBY_ROOM_NAME); // 讓 socket 離開 'lobby' 群組
-    console.log(`[Server] Socket ${socket.id} (${socket.data.playerName}) 離開 '${LOBBY_ROOM_NAME}' 群組並返回主頁。`);
+    console.info(`[Server] Socket ${socket.id} (${socket.data.playerName}) 離開 '${LOBBY_ROOM_NAME}' 群組並返回主頁。`); // Log level adjusted
   });
 
 
@@ -112,10 +111,10 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
     if (room && room.hasPlayer(socket.id)) { // 如果房間存在且玩家在該房間內
       room.handlePlayerAction(socket.id, action); // 呼叫 GameRoom 處理玩家動作
     } else if (room) { // 如果房間存在但玩家不在該房間內 (異常情況)
-       console.warn(`[Server] Socket ${socket.id} (${socket.data.playerName}) 嘗試向房間 ${roomId} 發送動作，但不在該房間內。`);
+       console.warn(`[Server] Socket ${socket.id} (${socket.data.playerName}) 嘗試向房間 ${roomId} 發送動作，但不在該房間內。`); // Kept as console.warn
        socket.emit('gameError', '您不在該遊戲房間內。');
     } else { // 如果房間不存在
-        console.warn(`[Server] Socket ${socket.id} (${socket.data.playerName}) 嘗試向不存在的房間 ${roomId} 發送動作。`);
+        console.warn(`[Server] Socket ${socket.id} (${socket.data.playerName}) 嘗試向不存在的房間 ${roomId} 發送動作。`); // Kept as console.warn
         socket.emit('gameError', '遊戲房間不存在。');
     }
   });
@@ -148,7 +147,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
   // --- 斷線處理 ---
   // 監聽 Socket 'disconnect' 事件
   socket.on('disconnect', (reason) => {
-    console.log(`[Server] 連接斷開: ${socket.id} (${socket.data.playerName})。原因: ${reason}`);
+    console.info(`[Server] 連接斷開: ${socket.id} (${socket.data.playerName})。原因: ${reason}`); // Log level adjusted
     socket.leave(LOBBY_ROOM_NAME); // 確保斷線玩家離開大廳群組
     roomManager.handlePlayerDisconnect(socket); // 呼叫 RoomManager 處理玩家斷線
   });
@@ -157,7 +156,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
 
 // 啟動 HTTP 伺服器並監聽指定埠號
 httpServer.listen(SERVER_PORT, () => {
-  console.log(`[Server] 象棋麻將後端伺服器正在監聽埠 ${SERVER_PORT}`);
+  console.info(`[Server] 象棋麻將後端伺服器正在監聽埠 ${SERVER_PORT}`); // Log level adjusted
   // 伺服器啟動時，可以向大廳廣播一條系統訊息 (如果大廳已有人)
   const systemMessage: ChatMessage = {
       id: `system-start-${Date.now()}`,
@@ -172,19 +171,19 @@ httpServer.listen(SERVER_PORT, () => {
 // 處理伺服器關閉信號 (例如 Ctrl+C)
 // 將 'process' 轉型為 'any' 以避免 TypeScript 對 'on' 和 'exit' 方法的類型檢查錯誤
 (process as any).on('SIGINT', () => {
-  console.log('[Server] 收到 SIGINT，開始關閉伺服器...');
+  console.info('[Server] 收到 SIGINT，開始關閉伺服器...'); // Log level adjusted
   // 關閉 Socket.IO 伺服器，停止接受新連接，並等待現有連接處理完成
   io.close(() => {
-    console.log('[Server] Socket.IO 伺服器已關閉。');
+    console.info('[Server] Socket.IO 伺服器已關閉。'); // Log level adjusted
     // 關閉 HTTP 伺服器
     httpServer.close(() => {
-      console.log('[Server] HTTP 伺服器已關閉。');
+      console.info('[Server] HTTP 伺服器已關閉。'); // Log level adjusted
       // 銷毀所有遊戲房間
       roomManager.getLobbyRoomsData().forEach(roomData => {
           const room = roomManager.getRoomById(roomData.id);
           room?.destroy(); // 呼叫 GameRoom 的銷毀方法
       });
-      console.log('[Server] 所有遊戲房間已清理。');
+      console.info('[Server] 所有遊戲房間已清理。'); // Log level adjusted
       // 退出 Node.js 程序
       // logger.ts 中的 process.on('exit', closeLogStream) 會在此處之前被觸發
       (process as any).exit(0);

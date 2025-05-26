@@ -116,7 +116,6 @@ export const GamePhaseTranslations: Record<GamePhase, string> = {
   [GamePhase.ACTION_PENDING_CHI_CHOICE]: "選擇吃牌組合", // 玩家選擇吃的具體牌型
   [GamePhase.GAME_OVER]: "遊戲結束",        // 整場比賽結束
   [GamePhase.ROUND_OVER]: "本局結束",       // 一局結束，準備下一局或結束比賽
-  // Fix: Add missing GamePhase.AWAITING_REMATCH_VOTES
   [GamePhase.AWAITING_REMATCH_VOTES]: "等待再戰投票",
 };
 
@@ -141,18 +140,23 @@ export const AI_NAME_PREFIX = "電腦 ";
 export const LOBBY_ROOM_NAME = 'lobby';
 /** @description 遊戲訊息記錄的最大條數。 */
 export const MAX_MESSAGE_LOG_ENTRIES = 50;
+
+// --- 日誌相關常數 ---
+/** @description 日誌級別枚舉，值越小級別越高。 */
+export enum LogLevel {
+  ERROR = 0, // 嚴重錯誤
+  WARN = 1,  // 警告
+  INFO = 2,  // 一般資訊
+  DEBUG = 3, // 除錯資訊
+}
+/** @description 定義日誌級別名稱到 LogLevel 枚舉值的映射。 */
+export const LOG_LEVEL_NAMES: { [key: string]: LogLevel } = {
+  'ERROR': LogLevel.ERROR,
+  'WARN': LogLevel.WARN,
+  'INFO': LogLevel.INFO,
+  'DEBUG': LogLevel.DEBUG,
+};
 /** @description 預設的日誌記錄目錄路徑。 */
 export const DEFAULT_LOG_DIRECTORY = "C:/Users/lnp89/Downloads/mut-xiangqi-mahjong-log";
-
-
-// --- 牌面台語/中文發音 (供音效使用，前端已定義，此處為伺服器端參考) ---
-// TAIWANESE_HOKKIEN_TILE_NAMES is primarily for client-side audio.
-// Server-side, it might be used for logging or if server were to generate audio cues.
-// Currently, client handles audio based on its constants.ts.
-
-// 注意：部分前端 `constants.ts` 中的常數 (如 `TAIWANESE_HOKKIEN_TILE_NAMES`)
-// 若伺服器端也需要 (例如用於日誌或其他邏輯)，則應在此處也定義一份，或透過共享類型/配置管理。
-// 為避免重複，假設與前端 `constants.ts` 的 `TAIWANESE_HOKKIEN_TILE_NAMES` 和 `GamePhaseTranslations` 內容一致。
-// 如果伺服器邏輯不直接依賴它們，則可省略。
-// 此處 GamePhaseTranslations 已複製過來，因為 GameRoom.ts 中有使用於日誌。
-// TAIWANESE_HOKKIEN_TILE_NAMES 伺服器端目前看起來未使用。
+/** @description 預設的日誌輸出級別。 */
+export const DEFAULT_LOG_LEVEL: LogLevel = LogLevel.INFO;

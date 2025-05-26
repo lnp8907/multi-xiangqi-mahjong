@@ -159,14 +159,14 @@ export class AIService {
         // 檢查是否能胡牌
         const huClaim = (aiPlayer.pendingClaims || []).find(c => c.action === 'Hu');
         if (huClaim) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 胡 ${discardedTile.kind}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 胡 ${discardedTile.kind}。`); // Log level adjusted
             return { type: 'DECLARE_HU' };
         }
 
         // 檢查是否能槓牌
         const gangClaim = (aiPlayer.pendingClaims || []).find(c => c.action === 'Gang');
         if (gangClaim) { 
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 槓 ${discardedTile.kind}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 槓 ${discardedTile.kind}。`); // Log level adjusted
             return { type: 'CLAIM_GANG', tile: discardedTile };
         }
 
@@ -174,7 +174,7 @@ export class AIService {
         const pengClaim = (aiPlayer.pendingClaims || []).find(c => c.action === 'Peng');
         if (pengClaim) { 
             // AI 策略：如果碰牌會嚴重破壞手牌潛力，則可能跳過。此處簡化為總是碰。
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 碰 ${discardedTile.kind}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 碰 ${discardedTile.kind}。`); // Log level adjusted
             return { type: 'CLAIM_PENG', tile: discardedTile };
         }
 
@@ -185,12 +185,12 @@ export class AIService {
             const actualChiOptions = gameState.chiOptions || getChiOptions(aiPlayer.hand, discardedTile); // 備用
             if (actualChiOptions && actualChiOptions.length > 0) {
                 // AI 策略：選擇第一個可用的吃牌選項。更複雜的 AI 可以評估哪個更好。
-                console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 吃 ${discardedTile.kind}，使用手牌 ${actualChiOptions[0].map(t => t.kind).join(', ')}。`);
+                console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定宣告 吃 ${discardedTile.kind}，使用手牌 ${actualChiOptions[0].map(t => t.kind).join(', ')}。`); // Log level adjusted
                 return { type: 'CLAIM_CHI', tilesToChiWith: actualChiOptions[0], discardedTile };
             }
         }
         // 如果沒有理想的宣告，則跳過
-        console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定跳過對 ${discardedTile.kind} 的宣告。`);
+        console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 決定跳過對 ${discardedTile.kind} 的宣告。`); // Log level adjusted
         return { type: 'PASS_CLAIM' }; 
     }
 
@@ -205,7 +205,7 @@ export class AIService {
         const anGangOptions = canDeclareAnGang(aiPlayer.hand, null); // drawnTile 為 null 表示檢查摸牌前
         if (anGangOptions.length > 0) {
             // AI 策略：目前如果可以就暗槓
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸牌前決定宣告 暗槓 ${anGangOptions[0]}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸牌前決定宣告 暗槓 ${anGangOptions[0]}。`); // Log level adjusted
             return { type: 'DECLARE_AN_GANG', tileKind: anGangOptions[0] };
         }
 
@@ -214,7 +214,7 @@ export class AIService {
         // 此處是 PLAYER_TURN_START，莊家可能已經打過第一張牌，所以天胡邏輯不在此。
         // 天胡通常是在發完牌後，打第一張牌前檢查。GameRoom.ts的startGameRound中處理。
 
-        console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸牌前無特殊動作，準備摸牌。`);
+        console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸牌前無特殊動作，準備摸牌。`); // Log level adjusted
         return null; 
     }
 
@@ -231,34 +231,34 @@ export class AIService {
       
         // 檢查是否能自摸
         if (checkWinCondition(handWithDrawnTile, aiPlayer.melds).isWin) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 自摸。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 自摸。`); // Log level adjusted
             return { type: 'DECLARE_HU' }; 
         }
 
         // 檢查使用剛摸到的牌進行暗槓 (摸到第四張相同的)
         const anGangOptionsAfterDraw = canDeclareAnGang(aiPlayer.hand, drawnTile);
         if (anGangOptionsAfterDraw.length > 0) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 暗槓 ${anGangOptionsAfterDraw[0]}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 暗槓 ${anGangOptionsAfterDraw[0]}。`); // Log level adjusted
             return { type: 'DECLARE_AN_GANG', tileKind: anGangOptionsAfterDraw[0] };
         }
 
         // 檢查使用剛摸到的牌進行加槓 (碰牌後摸到第四張)
         const mingGangOptionsAfterDraw = canDeclareMingGangFromHand(aiPlayer.hand, aiPlayer.melds, drawnTile);
         if (mingGangOptionsAfterDraw.length > 0) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 加槓 ${mingGangOptionsAfterDraw[0].pengMeldKind}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後決定宣告 加槓 ${mingGangOptionsAfterDraw[0].pengMeldKind}。`); // Log level adjusted
             return { type: 'DECLARE_MING_GANG_FROM_HAND', tileKind: mingGangOptionsAfterDraw[0].pengMeldKind };
         }
         
         // 如果沒有自摸或槓牌，則必須打出一張牌
         const tileToDiscard = chooseBestTileToDiscardAI(handWithDrawnTile, gameState);
         if (tileToDiscard) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後，選擇打出 ${tileToDiscard.kind} (ID: ${tileToDiscard.id})。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 摸到 ${drawnTile.kind} 後，選擇打出 ${tileToDiscard.kind} (ID: ${tileToDiscard.id})。`); // Log level adjusted
             return { type: 'DISCARD_TILE', tileId: tileToDiscard.id };
         } else {
             // 這種情況理論上不應該發生，因為摸牌後手牌必定增加，總有牌可打
-            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 摸牌後無牌可打! 手牌: ${JSON.stringify(handWithDrawnTile)}`);
+            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 摸牌後無牌可打! 手牌: ${JSON.stringify(handWithDrawnTile)}`); // Log level adjusted
             // 緊急備用方案：如果真的發生，打出剛摸的牌
-            console.log(`[AIService] (備用方案) AI ${aiPlayer.name} 打出剛摸到的牌 ${drawnTile.kind}。`);
+            console.debug(`[AIService] (備用方案) AI ${aiPlayer.name} 打出剛摸到的牌 ${drawnTile.kind}。`); // Log level adjusted
             return { type: 'DISCARD_TILE', tileId: drawnTile.id };
         }
     }
@@ -274,18 +274,18 @@ export class AIService {
         if (aiPlayer.hand.length === 0) {
             // 宣告面子後手牌空了，這通常意味著遊戲結束 (例如槓上開花然後胡牌)，或者是一個錯誤狀態。
             // 此函數預期是選擇一張牌打出。
-            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 在面子操作後手牌為空，無法打牌!`);
+            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 在面子操作後手牌為空，無法打牌!`); // Log level adjusted
             throw new Error("AI 手牌為空，無法在面子操作後打牌，此應為胡牌或錯誤狀態。");
         }
         const tileToDiscard = chooseBestTileToDiscardAI(aiPlayer.hand, gameState);
         if (tileToDiscard) {
-            console.log(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在面子操作後，選擇打出 ${tileToDiscard.kind}。`);
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在面子操作後，選擇打出 ${tileToDiscard.kind}。`); // Log level adjusted
             return { type: 'DISCARD_TILE', tileId: tileToDiscard.id };
         } else {
             // 幾乎不可能發生，因為上面檢查了 hand.length > 0
-            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 的 chooseBestTileToDiscardAI 返回 null，但手牌不為空: ${JSON.stringify(aiPlayer.hand)}`);
+            console.error(`[AIService] 嚴重錯誤: AI ${aiPlayer.name} 的 chooseBestTileToDiscardAI 返回 null，但手牌不為空: ${JSON.stringify(aiPlayer.hand)}`); // Log level adjusted
             // 最後的備用方案：打出手牌中的第一張
-            console.log(`[AIService] (備用方案) AI ${aiPlayer.name} 打出手牌中的第一張 ${aiPlayer.hand[0].kind}。`);
+            console.debug(`[AIService] (備用方案) AI ${aiPlayer.name} 打出手牌中的第一張 ${aiPlayer.hand[0].kind}。`); // Log level adjusted
             return { type: 'DISCARD_TILE', tileId: aiPlayer.hand[0].id }; 
         }
     }
@@ -334,7 +334,7 @@ export class AIService {
         }
         
         // 預設或錯誤狀態處理：AI 跳過
-        console.warn(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在未預期的遊戲階段 (${gamePhase}) 被要求行動，或非其決策回合。將跳過。`);
+        console.warn(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在未預期的遊戲階段 (${gamePhase}) 被要求行動，或非其決策回合。將跳過。`); // Log level adjusted
         return { type: 'PASS_CLAIM' };
     }
 
