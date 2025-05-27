@@ -83,6 +83,9 @@ export const EMPTY_ROOM_TIMEOUT_MS = 5 * 60 * 1000;
 export const GAME_END_EMPTY_ROOM_TIMEOUT_MS = 1 * 60 * 1000; 
 /** @description 下一局開始倒數秒數。GameState 中的 nextRoundCountdown 以秒為單位。 */
 export const NEXT_ROUND_COUNTDOWN_SECONDS = 10; 
+/** @description 再戰投票的超時時間 (秒)。 */
+export const REMATCH_VOTE_TIMEOUT_SECONDS = 20;
+
 
 // --- 設定選項相關常數 ---
 /** 
@@ -159,4 +162,4 @@ export const LOG_LEVEL_NAMES: { [key: string]: LogLevel } = {
 /** @description 預設的日誌記錄目錄路徑。 */
 export const DEFAULT_LOG_DIRECTORY = "C:/Users/lnp89/Downloads/mut-xiangqi-mahjong-log";
 /** @description 預設的日誌輸出級別。 */
-export const DEFAULT_LOG_LEVEL: LogLevel = LogLevel.INFO;
+export const DEFAULT_LOG_LEVEL: LogLevel = LogLevel.DEBUG;
