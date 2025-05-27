@@ -38,9 +38,9 @@ export const TILE_KIND_DETAILS: Readonly<Record<TileKind, { suit: Suit, orderVal
 /** @description 所有牌的種類列表 (從 TileKind 枚舉中獲取)。 */
 export const ALL_TILE_KINDS: TileKind[] = Object.values(TileKind);
 /** @description 遊戲中實際使用的牌的種類 (目前是全部14種)。 */
-export const PLAYABLE_TILE_KINDS: TileKind[] = ALL_TILE_KINDS; 
+export const PLAYABLE_TILE_KINDS: TileKind[] = ALL_TILE_KINDS;
 
-/** 
+/**
  * @description 定義可以組成順子的牌組。
  * 遊戲規則 (例如 `canChi`) 會檢查玩家是否擁有其中兩張，而第三張是被打出的牌。
  * 每個子陣列代表一個順子組合，例如 [將, 士, 象]。
@@ -54,17 +54,17 @@ export const SHUNZI_DEFINITIONS: ReadonlyArray<ReadonlyArray<TileKind>> = [
 
 // --- 遊戲相關常數 ---
 /** @description 玩家數量 (此遊戲固定為4人)。 */
-export const NUM_PLAYERS = 4; 
+export const NUM_PLAYERS = 4;
 /** @description 每種牌有幾張 (例如，每種棋子有4張)。 */
-export const TILES_PER_KIND = 4; 
+export const TILES_PER_KIND = 4;
 /** @description 莊家初始手牌數量。 */
-export const INITIAL_HAND_SIZE_DEALER = 8; 
+export const INITIAL_HAND_SIZE_DEALER = 8;
 /** @description 非莊家初始手牌數量。 */
-export const INITIAL_HAND_SIZE_NON_DEALER = 7; 
+export const INITIAL_HAND_SIZE_NON_DEALER = 7;
 /** @description 摸牌後，打牌前的最大手牌數量。 */
-export const MAX_HAND_SIZE_BEFORE_DISCARD = 8; 
+export const MAX_HAND_SIZE_BEFORE_DISCARD = 8;
 
-/** 
+/**
  * @description 宣告動作的優先順序。
  * - `HU`: 胡牌，優先序最高。
  * - `GANG`: 槓牌。
@@ -72,18 +72,18 @@ export const MAX_HAND_SIZE_BEFORE_DISCARD = 8;
  * - `CHI`: 吃牌，優先序最低。
  */
 export const ACTION_PRIORITY = {
-  HU: 3,   
-  GANG: 2, 
-  PENG: 2, 
-  CHI: 1,  
+  HU: 3,
+  GANG: 2,
+  PENG: 2,
+  CHI: 1,
 };
 
 /** @description 非玩家回合宣告的思考時間 (秒)。 */
-export const CLAIM_DECISION_TIMEOUT_SECONDS = 30; 
+export const CLAIM_DECISION_TIMEOUT_SECONDS = 30;
 /** @description 玩家回合內行動的思考時間 (秒)。 */
-export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 60; 
+export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 60;
 
-/** 
+/**
  * @description 新增：局數設定選項。
  * 用於創建房間時選擇遊戲總局數。
  * - `value`: 局數的數值。
@@ -100,7 +100,7 @@ export const ROUND_OPTIONS: ReadonlyArray<{ value: number, label: string }> = [
 export const NEXT_ROUND_COUNTDOWN_SECONDS = 10;
 
 
-/** 
+/**
  * @description 用於音效模擬的牌面台語/中文名稱。
  * 目前直接使用牌面字元作為預留位置，實際音效檔名可能需要對應這些名稱。
  */
@@ -121,7 +121,7 @@ export const TAIWANESE_HOKKIEN_TILE_NAMES: Readonly<Record<TileKind, string>> = 
   [TileKind.R_SOLDIER]: '兵',
 };
 
-/** 
+/**
  * @description 遊戲階段的繁體中文翻譯。
  * 用於在 UI 上顯示當前的遊戲進程。
  */
@@ -133,13 +133,13 @@ export const GamePhaseTranslations: Record<GamePhase, string> = {
   [GamePhase.PLAYER_DRAWN]: "玩家已摸牌",    // 等待打牌或自摸/槓
   [GamePhase.AWAITING_DISCARD]: "等待出牌",    // 例如莊家開局或吃碰槓後
   [GamePhase.TILE_DISCARDED]: "等待宣告",     // 有牌被打出，等待其他玩家宣告
+  [GamePhase.AWAITING_ALL_CLAIMS_RESPONSE]: "等待所有宣告回應", // 新增翻譯
   [GamePhase.AWAITING_CLAIMS_RESOLUTION]: "處理宣告中", // 系統處理多個宣告的優先順序
   [GamePhase.AWAITING_PLAYER_CLAIM_ACTION]: "等待玩家宣告決定", // 特定玩家決定是否宣告
   [GamePhase.ACTION_PENDING_CHI_CHOICE]: "選擇吃牌組合", // 玩家選擇吃的具體牌型
   [GamePhase.GAME_OVER]: "遊戲結束",        // 整場比賽結束
   [GamePhase.ROUND_OVER]: "本局結束",       // 一局結束，準備下一局或結束比賽
-  // Fix: Add missing GamePhase.AWAITING_REMATCH_VOTES
-  [GamePhase.AWAITING_REMATCH_VOTES]: "等待再戰投票", // 新增：等待玩家對再戰進行投票
+  [GamePhase.AWAITING_REMATCH_VOTES]: "等待再戰投票",
 };
 
 /** @description 新增：用於大廳聊天中識別系統訊息發送者名稱 (前端顯示用)。 */

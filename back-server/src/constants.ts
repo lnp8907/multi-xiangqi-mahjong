@@ -116,6 +116,7 @@ export const GamePhaseTranslations: Record<GamePhase, string> = {
   [GamePhase.PLAYER_DRAWN]: "玩家已摸牌",    // 等待打牌或自摸/槓
   [GamePhase.AWAITING_DISCARD]: "等待出牌",    // 例如莊家開局或吃碰槓後
   [GamePhase.TILE_DISCARDED]: "等待宣告",     // 有牌被打出，等待其他玩家宣告
+  [GamePhase.AWAITING_ALL_CLAIMS_RESPONSE]: "等待所有宣告回應", // 新增翻譯
   [GamePhase.AWAITING_CLAIMS_RESOLUTION]: "處理宣告中", // 系統處理多個宣告的優先順序
   [GamePhase.AWAITING_PLAYER_CLAIM_ACTION]: "等待玩家宣告決定", // 特定玩家決定是否宣告
   [GamePhase.ACTION_PENDING_CHI_CHOICE]: "選擇吃牌組合", // 玩家選擇吃的具體牌型

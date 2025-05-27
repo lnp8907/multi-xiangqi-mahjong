@@ -38,7 +38,7 @@ export const advanceToNextPlayerTurn = (room: GameRoom, afterDiscard: boolean): 
     const nextPlayer = room.players.find(p => p.id === room.gameState.currentPlayerIndex);
     if(nextPlayer) {
         room.addLog(`輪到 ${nextPlayer.name} (座位: ${nextPlayer.id}) 摸牌。`);
-        TimerManager.startActionTimerForPlayer(room, nextPlayer.id); // 為下一個玩家啟動行動計時器
+        TimerManager.startActionTimerForPlayer(room, nextPlayer.id, 'turn'); // 為下一個玩家啟動行動計時器
     }
     room.broadcastGameState(); // 廣播遊戲狀態更新
     AIHandler.processAITurnIfNeeded(room); // 檢查是否需要 AI 行動

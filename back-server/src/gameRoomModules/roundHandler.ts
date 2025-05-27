@@ -195,7 +195,7 @@ export const initializeOrResetGameForRound = (room: GameRoom, isNewMatch: boolea
     }
 
     room.broadcastGameState();
-    TimerManager.startActionTimerForPlayer(room, room.gameState.currentPlayerIndex); // 改用 TimerManager
+    TimerManager.startActionTimerForPlayer(room, room.gameState.currentPlayerIndex, 'turn'); // 改用 TimerManager
     AIHandler.processAITurnIfNeeded(room);
 };
 

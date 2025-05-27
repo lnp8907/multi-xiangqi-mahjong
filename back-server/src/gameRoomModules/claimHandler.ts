@@ -1,27 +1,34 @@
+
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { ServerPlayer } from '../Player';
-import { Tile, TileKind, Claim, GamePhase } from '../types';
+import { Tile, TileKind, Claim, GamePhase, SubmittedClaim } from '../types';
 import { checkWinCondition, canMingGang, canPeng, getChiOptions } from '../utils/gameRules';
-import { ACTION_PRIORITY, NUM_PLAYERS } // 確保 NUM_PLAYERS 已引入
-from '../constants';
+import { ACTION_PRIORITY, NUM_PLAYERS, CLAIM_DECISION_TIMEOUT_SECONDS } from '../constants';
 import * as TurnHandler from './turnHandler';
 import * as PlayerActionHandler from './playerActionHandler';
-import * as TimerManager from './timerManager';
-import * as AIHandler from './aiHandler'; // 引入 AIHandler
+import * as TimerManager from './timerManager'; // 標準導入 TimerManager
+import * as AIHandler from './aiHandler'; 
 
 /**
  * @description 當一張牌被打出後，檢查其他玩家是否可以對其進行宣告 (胡、碰、槓、吃)。
+ *              如果存在宣告，則啟動全局宣告流程。
  * @param {GameRoom} room - GameRoom 實例。
  * @param {Tile} discardedTile - 被打出的牌。
  * @param {number} discarderId - 打出該牌的玩家ID。
  */
 export const checkForClaims = (room: GameRoom, discardedTile: Tile, discarderId: number): void => {
-    room.gameState.potentialClaims = [];
-    room.players.forEach(player => {
-        if (player.id === discarderId) return;
+    room.gameState.potentialClaims = []; // 儲存所有玩家所有可能的宣告
+    room.gameState.submittedClaims = []; // 清空上一輪提交的宣告
+    room.gameState.chiOptions = null;    // 清除上一輪的吃牌選項
 
-        player.pendingClaims = [];
+    let hasAnyClaim = false;
+
+    room.players.forEach(player => {
+        player.pendingClaims = []; // 清除該玩家上一輪的待處理宣告
+        player.hasRespondedToClaim = false; // 重置回應狀態
+
+        if (player.id === discarderId) return;
 
         // 檢查胡牌
         if (checkWinCondition([...player.hand, discardedTile], player.melds).isWin) {
@@ -37,111 +44,197 @@ export const checkForClaims = (room: GameRoom, discardedTile: Tile, discarderId:
         }
         // 檢查吃牌 (只有下家可以吃)
         if (player.id === (discarderId + 1) % NUM_PLAYERS) {
-            const chiOptions = getChiOptions(player.hand, discardedTile);
-            if (chiOptions.length > 0) {
-                player.pendingClaims.push({ playerId: player.id, action: 'Chi', priority: ACTION_PRIORITY.CHI, tiles: [discardedTile] }); // tiles 欄位在此僅為標記，實際吃的牌在 chiOptions
+            const chiOptionsForThisPlayer = getChiOptions(player.hand, discardedTile);
+            if (chiOptionsForThisPlayer.length > 0) {
+                player.pendingClaims.push({ playerId: player.id, action: 'Chi', priority: ACTION_PRIORITY.CHI, tiles: [discardedTile] });
                 // 將吃牌選項存儲到 gameState 中，供 UI 和 AI 決策使用
-                room.gameState.chiOptions = chiOptions;
+                room.gameState.chiOptions = chiOptionsForThisPlayer; 
             }
         }
-        // 將該玩家所有可能的宣告加入到房間的潛在宣告列表中
-        room.gameState.potentialClaims.push(...player.pendingClaims);
+        
+        if (player.pendingClaims.length > 0) {
+            hasAnyClaim = true;
+            room.gameState.potentialClaims.push(...player.pendingClaims); // 收集所有潛在宣告
+            
+            // 如果是真人玩家且在線，通知其可用的宣告選項
+            if (player.isHuman && player.isOnline && player.socketId) {
+                let specificChiOptionsForEvent: Tile[][] | undefined;
+                // 只有當是輪到吃牌的玩家，才可能傳遞 chiOptions
+                if (player.id === (discarderId + 1) % NUM_PLAYERS) {
+                    // 如果 room.gameState.chiOptions 不是 null，則賦值；否則 specificChiOptionsForEvent 保持 undefined
+                    specificChiOptionsForEvent = room.gameState.chiOptions !== null ? room.gameState.chiOptions : undefined;
+                } else {
+                    specificChiOptionsForEvent = undefined; // 不是輪到吃牌的玩家，不傳遞 chiOptions
+                }
+
+                room.io.to(player.socketId).emit('availableClaimsNotification', { 
+                    claims: player.pendingClaims || [], // 確保 claims 不為 undefined
+                    chiOptions: specificChiOptionsForEvent // 現在確保是 Tile[][] 或 undefined
+                });
+            }
+        }
     });
 
-    // 如果有任何潛在的宣告
-    if (room.gameState.potentialClaims.length > 0) {
-        room.gameState.gamePhase = GamePhase.AWAITING_CLAIMS_RESOLUTION; // 設定遊戲階段為等待宣告處理
-        startClaimDecisionProcess(room); // 開始宣告決策流程
+    if (hasAnyClaim) {
+        room.gameState.gamePhase = GamePhase.AWAITING_ALL_CLAIMS_RESPONSE; // 新階段：等待所有玩家回應
+        room.addLog(`棄牌 ${discardedTile.kind}。等待所有有宣告權的玩家回應...`);
+        TimerManager.startGlobalClaimTimer(room); // 啟動全局宣告計時器
+
+        // 觸發所有AI玩家立即決策
+        room.players.forEach(p => {
+            if ((!p.isHuman || !p.isOnline) && p.pendingClaims && p.pendingClaims.length > 0) {
+                AIHandler.processAIClaimDecision(room, p); 
+            }
+        });
+
     } else {
         // 如果沒有人可以宣告
         room.addLog(`無人宣告 ${discardedTile.kind}。`);
-        room.gameState.lastDiscardedTile = null; // 清除上一張棄牌的記錄
-        TurnHandler.advanceToNextPlayerTurn(room, true); // 推進到下一個玩家的回合 (true 表示是在棄牌後)
+        room.gameState.lastDiscardedTile = null; 
+        TurnHandler.advanceToNextPlayerTurn(room, true); 
     }
-    room.broadcastGameState(); // 廣播遊戲狀態更新
+    room.broadcastGameState(); 
 };
 
+
 /**
- * @description 開始宣告決策流程，按優先順序遍歷可宣告的玩家。
+ * @description 收集完所有玩家的宣告決策 (或超時) 後，處理並裁決這些宣告。
  * @param {GameRoom} room - GameRoom 實例。
  */
-export const startClaimDecisionProcess = (room: GameRoom): void => {
-    // 對潛在宣告按優先順序排序 (高優先序在前)
-    room.gameState.potentialClaims.sort((a, b) => b.priority - a.priority);
+export const resolveAllSubmittedClaims = (room: GameRoom): void => {
+    TimerManager.clearGlobalClaimTimer(room); // 清除全局計時器
+    room.gameState.gamePhase = GamePhase.AWAITING_CLAIMS_RESOLUTION; // 進入裁決階段
 
-    const highestPriorityClaim = room.gameState.potentialClaims[0];
-    if (!highestPriorityClaim) { // 如果沒有宣告 (理論上在 checkForClaims 已處理，此處為防禦)
+    const actualClaims = room.gameState.submittedClaims.filter(sc => sc.action !== 'Pass');
+
+    if (actualClaims.length === 0) {
+        room.addLog("所有玩家選擇跳過宣告。");
+        room.gameState.lastDiscardedTile = null;
+        clearClaimsAndTimer(room); // 清理 submittedClaims 等
         TurnHandler.advanceToNextPlayerTurn(room, true);
+        room.broadcastGameState();
         return;
     }
-    // 找出所有與最高優先序相同的宣告 (例如多個玩家可以胡同一張牌)
-    const highestPriorityClaims = room.gameState.potentialClaims.filter(
-        claim => claim.priority === highestPriorityClaim.priority
+
+    // 按優先級排序 (Hu > Gang/Peng > Chi)
+    actualClaims.sort((a, b) => {
+        const priorityA = ACTION_PRIORITY[a.action.toUpperCase() as keyof typeof ACTION_PRIORITY] || 0;
+        const priorityB = ACTION_PRIORITY[b.action.toUpperCase() as keyof typeof ACTION_PRIORITY] || 0;
+        return priorityB - priorityA;
+    });
+
+    const highestPriorityAction = actualClaims[0].action;
+    const highestPriorityLevel = ACTION_PRIORITY[highestPriorityAction.toUpperCase() as keyof typeof ACTION_PRIORITY];
+
+    // 找出所有具有相同最高優先級的宣告
+    const topPriorityClaims = actualClaims.filter(claim => 
+        (ACTION_PRIORITY[claim.action.toUpperCase() as keyof typeof ACTION_PRIORITY] || 0) === highestPriorityLevel
     );
 
-    // 處理一炮多響 (多個玩家胡同一張牌)
-    if (highestPriorityClaim.action === 'Hu' && highestPriorityClaims.length > 1) {
-        room.addLog(`一炮多響！玩家 ${highestPriorityClaims.map(c => `${room.players.find(p=>p.id===c.playerId)?.name}(${c.playerId})`).join(', ')} 均可胡牌 ${room.gameState.lastDiscardedTile!.kind}。`);
-        // 讓所有胡牌的玩家都執行胡牌動作
-        highestPriorityClaims.forEach(huClaim => {
-            PlayerActionHandler.processDeclareHu(room, huClaim.playerId);
+    if (highestPriorityAction === 'Hu' && topPriorityClaims.length > 0) {
+        // 處理胡牌 (包括一炮多響)
+        room.addLog(`胡牌宣告優先！玩家 ${topPriorityClaims.map(c => room.players.find(p=>p.id===c.playerId)?.name).join(', ')} 胡牌。`);
+        let gameAlreadyEnded = false;
+        topPriorityClaims.forEach(huClaim => {
+            if (!gameAlreadyEnded) { // 防止因第一個胡牌導致遊戲結束後，後續胡牌邏輯出錯
+                 const success = PlayerActionHandler.processDeclareHu(room, huClaim.playerId);
+                 if (success && (room.gameState.gamePhase === GamePhase.ROUND_OVER || room.gameState.gamePhase === GamePhase.GAME_OVER)) {
+                     gameAlreadyEnded = true;
+                 }
+            }
         });
-        // 胡牌後遊戲通常會結束或進入下一局，由 processDeclareHu -> handleRoundEndFlow 處理
-        return; // 完成一炮多響處理
-    }
-
-    // 如果不是一炮多響，則選擇第一個最高優先序的宣告者
-    const playerToDecide = room.players.find(p => p.id === highestPriorityClaim.playerId);
-    if (playerToDecide) {
-        room.gameState.playerMakingClaimDecision = playerToDecide.id; // 設定正在做決定的玩家
-        room.gameState.gamePhase = GamePhase.AWAITING_PLAYER_CLAIM_ACTION; // 設定遊戲階段
-        
-        // 如果是吃牌，確保 chiOptions 更新
-        if (highestPriorityClaim.action === 'Chi') {
-            room.gameState.chiOptions = getChiOptions(playerToDecide.hand, room.gameState.lastDiscardedTile!);
-        } else {
-            room.gameState.chiOptions = null; // 其他宣告清除吃牌選項
+        if (!gameAlreadyEnded) { // 如果胡牌宣告處理後遊戲未正常結束 (例如詐胡)
+            room.addLog("胡牌宣告處理完畢，但遊戲未結束。可能為詐胡或多響後仍有流程。");
+             // 如果所有胡牌都失敗了，需要有回退機制，例如讓下一個宣告者行動或推進回合
+             // 這部分邏輯比較複雜，暫時簡化為如果胡牌都失敗，則認為無有效宣告
+             // 實際上 processDeclareHu 內部會在詐胡時調用 processPassClaim，這會重新觸發宣告檢查或推進回合
         }
-
-        room.addLog(`輪到 ${playerToDecide.name} (座位: ${playerToDecide.id}) 決定是否宣告 ${highestPriorityClaim.action} ${room.gameState.lastDiscardedTile!.kind}。`);
-        TimerManager.startActionTimerForPlayer(room, playerToDecide.id); // 為真人玩家啟動UI計時器
-        room.broadcastGameState(); // 廣播狀態
-
-        // *** 新增：如果輪到 AI 玩家做宣告決定，則立即觸發其思考流程 ***
-        if (!playerToDecide.isHuman || !playerToDecide.isOnline) {
-            AIHandler.processAITurnIfNeeded(room);
+         clearClaimsAndTimer(room); // 清理
+    } else if (topPriorityClaims.length > 0) {
+        // 處理非胡牌的最高優先級宣告 (碰、槓、吃)
+        // 由於碰/槓優先級高於吃，且不能同時發生，這裡取第一個即可 (已排序)
+        const winningClaim = topPriorityClaims[0];
+        const player = room.players.find(p => p.id === winningClaim.playerId);
+        
+        if (player && room.gameState.lastDiscardedTile) {
+            room.addLog(`玩家 ${player.name} 的 ${winningClaim.action} 宣告優先。`);
+            let success = false;
+            switch (winningClaim.action) {
+                case 'Gang':
+                    success = PlayerActionHandler.processClaimGang(room, player.id, room.gameState.lastDiscardedTile);
+                    break;
+                case 'Peng':
+                    success = PlayerActionHandler.processClaimPeng(room, player.id, room.gameState.lastDiscardedTile);
+                    break;
+                case 'Chi':
+                    // 確保 chiCombination 存在
+                    if (winningClaim.chiCombination) {
+                        success = PlayerActionHandler.processClaimChi(room, player.id, winningClaim.chiCombination, room.gameState.lastDiscardedTile);
+                    } else {
+                        room.addLog(`錯誤：玩家 ${player.name} 嘗試吃牌但未提供組合。`);
+                        PlayerActionHandler.processPassClaim(room, player.id); // 出錯則跳過
+                    }
+                    break;
+            }
+            if (!success && winningClaim.action !== 'Pass') { // 如果宣告執行失敗且不是主動Pass
+                 PlayerActionHandler.processPassClaim(room, player.id);
+            }
+        } else {
+            room.addLog("無法執行優先宣告，將推進回合。");
+            clearClaimsAndTimer(room);
+            TurnHandler.advanceToNextPlayerTurn(room, true);
         }
     } else {
-        // 理論上 playerToDecide 應該總能找到，如果找不到則跳過並推進回合
-        console.warn(`[ClaimHandler ${room.roomId}] 在 startClaimDecisionProcess 中未找到玩家 ID: ${highestPriorityClaim.playerId}。`);
+        // 理論上不應到達此處，因為已檢查 actualClaims.length === 0
+        room.addLog("無有效宣告被執行。");
+        clearClaimsAndTimer(room);
         TurnHandler.advanceToNextPlayerTurn(room, true);
     }
+    room.broadcastGameState();
 };
 
+
 /**
- * @description 清除所有玩家的待宣告動作、潛在宣告列表、正在做宣告決定的玩家標記、
- *              行動計時器以及吃牌選項。
+ * @description 清除所有與當前宣告流程相關的狀態。
  * @param {GameRoom} room - GameRoom 實例。
  */
 export const clearClaimsAndTimer = (room: GameRoom): void => {
-    room.players.forEach(p => p.pendingClaims = []);
+    room.players.forEach(p => {
+        p.pendingClaims = [];
+        p.hasRespondedToClaim = false;
+    });
     room.gameState.potentialClaims = [];
-    room.gameState.playerMakingClaimDecision = null;
-    TimerManager.clearActionTimer(room); // 使用 TimerManager 清除計時器
+    room.gameState.submittedClaims = []; // 清除已提交的宣告
+    room.gameState.playerMakingClaimDecision = null; // 此欄位可能不再主要使用
+    TimerManager.clearGlobalClaimTimer(room); // 清除全局宣告計時器
     room.gameState.chiOptions = null;
 };
 
 /**
- * @description 處理無效宣告 (例如手牌不足)。
+ * @description 處理無效宣告。在新模型下，此函數可能較少被直接調用，
+ *              因為決策是先收集再統一處理。但可保留用於AI或特定錯誤場景。
  * @param {GameRoom} room - GameRoom 實例。
  * @param {ServerPlayer} player - 執行無效宣告的玩家。
  * @param {string} claimType - 無效宣告的類型 (例如 "Peng", "Chi")。
  */
 export const handleInvalidClaim = (room: GameRoom, player: ServerPlayer, claimType: string): void => {
-    room.addLog(`${player.name} (座位: ${player.id}) 宣告 ${claimType} 失敗 (條件不符)。`);
-    if(player.socketId) room.io.to(player.socketId).emit('gameError', `您的 ${claimType} 宣告無效。`);
-    // 玩家宣告無效後，應自動為其執行 PASS_CLAIM
-    PlayerActionHandler.processPassClaim(room, player.id);
+    room.addLog(`${player.name} (座位: ${player.id}) 嘗試的 ${claimType} 宣告無效。`);
+    if(player.socketId) room.io.to(player.socketId).emit('gameError', `您的 ${claimType} 宣告無效或條件不符。`);
+    // 在新模型中，如果一個宣告在 resolveAllSubmittedClaims 中被認定為無效，
+    // 應該從 submittedClaims 中移除或標記，然後重新評估次高優先級的宣告，
+    // 而不是簡單地讓該玩家 PASS_CLAIM。
+    // 但如果是在提交前客戶端就發送了無效請求，則此處直接讓其 PASS_CLAIM 可能是合理的。
+    const existingSubmission = room.gameState.submittedClaims.find(sc => sc.playerId === player.id);
+    if (!existingSubmission) { // 如果玩家還未提交過任何決策，則認為是主動跳過
+        room.gameState.submittedClaims.push({ playerId: player.id, action: 'Pass' });
+        // 檢查是否所有人都已回應
+        const humanPlayersNeedingToRespond = room.players.filter(p =>
+            p.isHuman && p.isOnline && (p.pendingClaims && p.pendingClaims.length > 0) && !p.hasRespondedToClaim
+        );
+        if (humanPlayersNeedingToRespond.length === 0) {
+            resolveAllSubmittedClaims(room);
+        }
+    }
 };
 
 /**
@@ -150,15 +243,13 @@ export const handleInvalidClaim = (room: GameRoom, player: ServerPlayer, claimTy
  * @param {string} tileId - 被消耗的牌的ID。
  */
 export const consumeDiscardedTileForMeld = (room: GameRoom, tileId: string): void => {
-    // 檢查是否為最新棄牌
     if (room.gameState.lastDiscardedTile && room.gameState.lastDiscardedTile.id === tileId) {
-        room.gameState.discardPile.shift(); // 從棄牌堆頂部移除
-        room.gameState.lastDiscardedTile = null; // 清除最新棄牌標記
+        room.gameState.discardPile.shift(); 
+        room.gameState.lastDiscardedTile = null; 
     } else {
-        // 如果不是最新棄牌 (理論上不應發生在常規碰吃槓流程，除非有特殊規則或錯誤)
         const indexToRemove = room.gameState.discardPile.findIndex(info => info.tile.id === tileId);
         if (indexToRemove !== -1) {
-            room.gameState.discardPile.splice(indexToRemove, 1); // 從棄牌堆中移除
+            room.gameState.discardPile.splice(indexToRemove, 1); 
         } else {
             console.warn(`[ClaimHandler ${room.roomId}] 嘗試消耗棄牌 ${tileId}，但在棄牌堆中未找到。`);
         }

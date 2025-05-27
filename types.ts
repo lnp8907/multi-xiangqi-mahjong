@@ -1,3 +1,4 @@
+
 // 定義牌的顏色 (黑、紅)
 export enum Suit {
   BLACK = 'Black', // 黑色
@@ -40,7 +41,7 @@ export enum MeldDesignation {
   SHUNZI = '順子', // 三張同花色且序數相連的牌
   KEZI = '刻子',   // 三張相同的牌
   GANGZI = '槓子', // 四張相同的牌
-  DUIZI = '對子',   // 兩張相同的牌 (用於胡牌時的眼)
+  DUIZI = '對子',   // 兩張相同的牌 (用於胡牌時 Αγροthe眼)
 }
 
 /**
@@ -70,6 +71,7 @@ export interface Player {
   isOnline?: boolean; // 多人遊戲中，玩家是否在線 (伺服器端維護)
   socketId?: string; // 多人遊戲中，玩家的 socket ID (僅對真人玩家有意義)
   isHost?: boolean; // 是否為房主 (由伺服器設定並同步到客戶端)
+  hasRespondedToClaim?: boolean; // 標記玩家是否已對當前回合的宣告做出回應
 }
 
 
@@ -95,6 +97,7 @@ export enum GamePhase {
   PLAYER_DRAWN = 'PLAYER_DRAWN',         // 玩家已摸牌 (等待玩家打牌或宣告暗槓/自摸/加槓)
   AWAITING_DISCARD = 'AWAITING_DISCARD', // 玩家已摸牌，等待玩家打出一張牌 (例如莊家開局或吃碰槓後)
   TILE_DISCARDED = 'TILE_DISCARDED',     // 有牌被打出，系統初步檢查是否有玩家可宣告
+  AWAITING_ALL_CLAIMS_RESPONSE = 'AWAITING_ALL_CLAIMS_RESPONSE', // 新增：等待所有有宣告權的玩家回應
   AWAITING_CLAIMS_RESOLUTION = 'AWAITING_CLAIMS_RESOLUTION', // 系統正在處理多個玩家對同一棄牌的宣告的優先順序
   AWAITING_PLAYER_CLAIM_ACTION = 'AWAITING_PLAYER_CLAIM_ACTION', // 特定玩家(通常是真人)正在決定是否對棄牌進行宣告 (有計時器)
   ACTION_PENDING_CHI_CHOICE = 'ACTION_PENDING_CHI_CHOICE', // 真人玩家需要選擇吃的組合
@@ -130,6 +133,18 @@ export interface DiscardedTileInfo {
 }
 
 /**
+ * @description 玩家提交的宣告決策
+ */
+export interface SubmittedClaim {
+  playerId: number;
+  action: 'Hu' | 'Peng' | 'Gang' | 'Chi' | 'Pass'; // Pass 表示跳過
+  // 如果是吃，還需要包含選擇的吃牌組合
+  chiCombination?: Tile[];
+  chosenPengGangTileKind?: TileKind; // 用於記錄碰或槓的目標牌種
+}
+
+
+/**
  * @description 定義整個遊戲的狀態結構 (客戶端與伺服器端同步的核心數據)
  */
 export interface GameState {
@@ -159,7 +174,7 @@ export interface GameState {
   // 用於宣告決策過程的狀態
   playerMakingClaimDecision: number | null; // 正在被提示對宣告作決定的玩家ID (玩家索引)
   actionTimer: number | null; // 通用行動計時器 (秒)，用於玩家回合或宣告決定
-  actionTimerType: 'claim' | 'turn' | null; // 計時器類型：宣告階段或玩家回合階段
+  actionTimerType: 'claim' | 'turn' | 'global_claim' | null; // 計時器類型：宣告階段或玩家回合階段
 
   // 新增：局數相關狀態
   numberOfRounds?: number;        // 本次比賽總局數 (來自 RoomSettings, 變為可選以兼容舊數據)
@@ -178,6 +193,10 @@ export interface GameState {
   rematchVotes?: RematchVote[]; // 玩家的再戰投票
   rematchCountdown?: number | null; // 再戰投票倒數計時 (秒)
   rematchInitiatorId?: number | null; // (棄用或重新思考) 原設計可能用於追蹤誰發起再戰，但新邏輯是全員投票
+
+  // 新增：用於新的宣告流程
+  submittedClaims: SubmittedClaim[]; // 儲存本輪所有玩家提交的實際宣告
+  globalClaimTimerActive: boolean;   // 標記全局宣告計時器是否正在運行
 }
 
 /**
@@ -225,6 +244,7 @@ export type GameActionPayload =
   | { type: 'CLAIM_CHI'; tilesToChiWith: Tile[]; discardedTile: Tile } // 玩家宣告吃牌 (tilesToChiWith 為手中的兩張牌，discardedTile 為被吃的牌)
   | { type: 'DECLARE_HU' } // 玩家宣告胡牌
   | { type: 'PASS_CLAIM' } // 玩家選擇跳過宣告 (不吃、不碰、不槓、不胡)
+  | { type: 'SUBMIT_CLAIM_DECISION'; decision: SubmittedClaim } // 新增：玩家提交宣告決策
   | { type: 'SET_NEXT_ROUND_COUNTDOWN' } // (僅伺服器) 設定下一局開始的倒數計時
   | { type: 'DECREMENT_NEXT_ROUND_COUNTDOWN' } // (僅伺服器或客戶端內部) 減少下一局倒數計時
   | { type: 'PLAYER_CONFIRM_NEXT_ROUND'; playerId: number } // 客戶端玩家確認準備好下一局
@@ -234,6 +254,7 @@ export type GameActionPayload =
   | { type: 'RESOLVE_CLAIMS' } // (僅伺服器) 處理所有宣告並決定最終執行者
   | { type: 'DECREMENT_ACTION_TIMER' } // (僅伺服器) 減少玩家行動計時器
   | { type: 'ACTION_TIMER_EXPIRED'; payload?: { explicitlySelectedTileId?: string | null } } // (僅伺服器) 玩家行動計時器到期，附帶可能的自動操作資訊
+  | { type: 'GLOBAL_CLAIM_TIMER_EXPIRED' } // 新增：全局宣告計時器到期
   | { type: 'ACTION_PENDING_CHI_CHOICE' } // (僅伺服器) 更新遊戲階段，提示客戶端玩家選擇吃牌組合
   // 再戰相關動作 (取代舊的 REQUEST_REMATCH)
   | { type: 'PLAYER_VOTE_REMATCH'; vote: 'yes' } // 玩家投票同意再戰
@@ -257,7 +278,8 @@ export type AIExecutableAction =
   | Extract<GameAction, { type: 'CLAIM_GANG' }>
   | Extract<GameAction, { type: 'CLAIM_CHI' }>
   | Extract<GameAction, { type: 'DECLARE_HU' }>
-  | Extract<GameAction, { type: 'PASS_CLAIM' }>;
+  | Extract<GameAction, { type: 'PASS_CLAIM' }>
+  | Extract<GameAction, {type: 'SUBMIT_CLAIM_DECISION'}>; // AI 也會提交決策
 
 /**
  * @description 聊天訊息的結構
@@ -295,12 +317,12 @@ export interface RoomListData {
 export interface ServerToClientEvents {
   /** @description Socket 連接錯誤事件 */
   connect_error: (err: Error) => void;
-  /** @description Socket 斷開連接事件 
+  /** @description Socket 斷開連接事件
    * @param {string} reason - 斷開原因
    * @param {any} [description] - 伺服器提供的額外描述
   */
-  disconnect: (reason: string, description?: any) => void; 
-  
+  disconnect: (reason: string, description?: any) => void;
+
   // --- 大廳事件 ---
   /** @description 伺服器發送大廳房間列表
    * @param {RoomListData[]} rooms - 房間列表數據
@@ -313,7 +335,7 @@ export interface ServerToClientEvents {
   /** @description 伺服器發送大廳相關錯誤訊息 (例如：創建房間失敗)
    * @param {string} message - 錯誤訊息
    */
-  lobbyError: (message: string) => void; 
+  lobbyError: (message: string) => void;
 
   // --- 遊戲事件 ---
   /** @description 客戶端成功加入房間後，伺服器發送此事件
@@ -326,18 +348,18 @@ export interface ServerToClientEvents {
   /** @description 伺服器發送遊戲狀態更新 (可以是完整或部分狀態)
    * @param {GameState} gameState - 最新的遊戲狀態
    */
-  gameStateUpdate: (gameState: GameState) => void; 
+  gameStateUpdate: (gameState: GameState) => void;
   /** @description 有新玩家加入遊戲房間 (此事件目前被 gameStateUpdate 中的 players 陣列更新所隱含，可能移除)
    * @param {Player} player - 新加入的玩家資訊
    */
-  gamePlayerJoined: (player: Player) => void; 
+  gamePlayerJoined: (player: Player) => void;
   /** @description 有玩家離開遊戲房間 (例如斷線)
    * @param {object} data - 包含離開玩家的資訊
    * @param {number} data.playerId - 離開的玩家ID (座位索引)
    * @param {number} [data.newHostId] - 如果房主離開，新的房主ID (座位索引)
    * @param {string} [data.message] - 相關訊息，例如離開原因
    */
-  gamePlayerLeft: (data: { playerId: number; newHostId?: number; message?: string }) => void; 
+  gamePlayerLeft: (data: { playerId: number; newHostId?: number; message?: string }) => void;
   /** @description 伺服器廣播遊戲內聊天訊息
    * @param {ChatMessage} message - 聊天訊息對象
    */
@@ -345,7 +367,7 @@ export interface ServerToClientEvents {
   /** @description 伺服器發送遊戲相關錯誤訊息 (例如：無效操作)
    * @param {string} message - 錯誤訊息
    */
-  gameError: (message: string) => void; 
+  gameError: (message: string) => void;
   /** @description 伺服器廣播玩家動作宣告的視覺特效 (例如：碰、槓、胡)
    * @param {object} data - 宣告特效的相關資訊
    * @param {string} data.text - 宣告的文字 (例如："碰")
@@ -356,6 +378,13 @@ export interface ServerToClientEvents {
    */
   actionAnnouncement: (data: { text: string; playerId: number; position: 'top' | 'bottom' | 'left' | 'right', id: number, isMultiHuTarget?: boolean }) => void;
   // ROUND_OVER 和 GAME_OVER 事件現在已整合到 gameStateUpdate.gamePhase 的變化中
+
+  /** @description 伺服器通知客戶端其可以進行的宣告選項 (在同時詢問模型中)
+   * @param {object} data - 包含可用宣告和吃牌選項的數據
+   * @param {Claim[]} data.claims - 客戶端可用的宣告列表
+   * @param {Tile[][]} [data.chiOptions] - 如果可以吃，則包含可吃的組合
+   */
+  availableClaimsNotification: (data: { claims: Claim[], chiOptions?: Tile[][] }) => void;
 }
 
 /**
@@ -390,14 +419,14 @@ export interface ClientToServerEvents {
    */
   lobbySendChatMessage: (messageText: string) => void;
   /** @description 客戶端通知伺服器其已離開大廳視圖 (例如返回主頁) */
-  lobbyLeave: () => void; 
+  lobbyLeave: () => void;
 
   // --- 遊戲事件 ---
   /** @description 客戶端發送遊戲中的玩家動作
    * @param {string} roomId - 動作發生的房間ID
    * @param {GameActionPayload} action - 玩家執行的動作及其負載
    */
-  gamePlayerAction: (roomId: string, action: GameActionPayload) => void; 
+  gamePlayerAction: (roomId: string, action: GameActionPayload) => void;
   /** @description 客戶端發送遊戲內的聊天訊息
    * @param {string} roomId - 訊息發送的房間ID
    * @param {string} messageText - 聊天訊息內容
@@ -407,11 +436,11 @@ export interface ClientToServerEvents {
   /** @description 房主請求開始遊戲
    * @param {string} roomId - 要開始遊戲的房間ID
    */
-  gameRequestStart: (roomId: string) => void; 
+  gameRequestStart: (roomId: string) => void;
   /** @description 玩家請求退出當前所在的遊戲房間 (無論是等待中或遊戲中)
    * @param {string} roomId - 要退出的房間ID
    */
-  gameQuitRoom: (roomId: string) => void; 
+  gameQuitRoom: (roomId: string) => void;
   // gameRequestRematch 已被新的 PLAYER_VOTE_REMATCH 取代
 }
 

@@ -33,6 +33,8 @@ export class ServerPlayer implements PlayerInterface {
   isHost: boolean;
   /** @property {Claim[]} [pendingClaims] - 該玩家對當前棄牌可進行的宣告 (由伺服器計算)。 */
   pendingClaims?: Claim[]; 
+  /** @property {boolean} [hasRespondedToClaim] - 標記玩家是否已對當前回合的宣告做出回應。 */
+  hasRespondedToClaim?: boolean;
 
   /**
    * @constructor
@@ -52,6 +54,7 @@ export class ServerPlayer implements PlayerInterface {
     this.socketId = socketId;
     this.isHost = isHost;
     this.pendingClaims = []; // 初始化空宣告列表
+    this.hasRespondedToClaim = false; // 初始化回應狀態
   }
 
   /**
