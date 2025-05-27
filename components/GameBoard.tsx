@@ -1,4 +1,3 @@
-
 // 引入 React 相關的鉤子和 Socket.IO 客戶端類型
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
@@ -15,7 +14,7 @@ import NextRoundConfirmModal from './NextRoundConfirmModal';
 import ActionAnnouncer, { ActionAnnouncement } from './ActionAnnouncer'; 
 import ProgressBar from './ProgressBar'; 
 // 引入類型定義和常數
-import { Tile, GamePhase, Claim, TileKind, Player, GameState, RoomSettings, ChatMessage, ServerToClientEvents, ClientToServerEvents, GameActionPayload, Suit, RematchVote, DiscardedTileInfo } from '../types'; 
+import { Tile, GamePhase, Claim, TileKind, Player, GameState, RoomSettings, ChatMessage, ServerToClientEvents, ClientToServerEvents, GameActionPayload, Suit, RematchVote, DiscardedTileInfo, NotificationType } from '../types'; 
 import { TILE_KIND_DETAILS, GamePhaseTranslations, INITIAL_HAND_SIZE_DEALER, PLAYER_TURN_ACTION_TIMEOUT_SECONDS, CLAIM_DECISION_TIMEOUT_SECONDS, NUM_PLAYERS, ALL_TILE_KINDS as TILE_KIND_ENUM_VALUES, NEXT_ROUND_COUNTDOWN_SECONDS } from '../constants'; 
 // 引入遊戲規則相關的輔助函數 (主要用於 UI 判斷，伺服器為權威)
 import { canDeclareAnGang, canDeclareMingGangFromHand, checkWinCondition } from '../utils/gameRules'; // getChiOptions 已被伺服器端 chiOptions 取代
@@ -38,6 +37,8 @@ interface GameBoardProps {
   toggleSettingsPanel: () => void; 
   /** @param {Socket<ServerToClientEvents, ClientToServerEvents>} socket - Socket.IO 連接實例。 */
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
+  /** @param {(message: string, type: NotificationType, duration?: number) => void} addNotification - 用於顯示通知的函數。 */
+  addNotification: (message: string, type: NotificationType, duration?: number) => void;
 }
 
 /**
@@ -63,7 +64,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
     clientPlayerId, 
     onQuitGame, 
     toggleSettingsPanel, 
-    socket 
+    socket,
+    addNotification 
 }) => {
   // --- 狀態管理 ---
   /** @description 當前的遊戲狀態，由 App.tsx 管理並透過 props傳入，此處為本地副本。 */
@@ -253,7 +255,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const emitPlayerAction = useCallback((action: GameActionPayload) => {
     if (!gameState.roomId) { 
         console.error("[GameBoard] 無法發送玩家動作：roomId 為 null。");
-        alert("發生錯誤：房間 ID 未設定，無法執行動作。");
+        addNotification("發生錯誤：房間 ID 未設定，無法執行動作。", 'error');
         return;
     }
     setIsSubmitting(true); 
@@ -264,7 +266,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
       setIsSelectingChiCombo(false); // 如果是吃牌宣告，關閉彈窗
     }
     setTimeout(() => setIsSubmitting(false), 500); 
-  }, [socket, gameState.roomId]); 
+  }, [socket, gameState.roomId, addNotification]); 
 
 
   // --- 自動摸牌功能 ---

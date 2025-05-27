@@ -1,4 +1,3 @@
-
 // 定義牌的顏色 (黑、紅)
 export enum Suit {
   BLACK = 'Black', // 黑色
@@ -466,3 +465,8 @@ export interface SocketData {
  * @deprecated 此類型與 RoomListData 重疊，且密碼處理應分開。若 roomService 完全被後端取代則可移除。
  */
 export type MockRoomData = RoomListData & { password?: string };
+
+/**
+ * @description 定義通知的可能類型 (匯出以供其他檔案使用)
+ */
+export type NotificationType = 'success' | 'error' | 'warning' | 'info';

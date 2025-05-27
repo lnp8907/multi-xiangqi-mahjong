@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import GameModal from './GameModal'; // 引入通用模態框組件
 import ActionButton from './ActionButton'; // 引入動作按鈕組件
-import { ClientRoomSettingsData } from '../types'; // 引入客戶端房間設定的類型定義
+import { ClientRoomSettingsData, NotificationType } from '../types'; // 引入客戶端房間設定的類型定義，並新增 NotificationType
 import { ROUND_OPTIONS, NUM_PLAYERS } from '../constants'; // 引入局數選項和固定玩家數
 
 /**
@@ -19,6 +18,8 @@ interface CreateRoomModalProps {
    *         參數為房間設定物件 (不包含 maxPlayers，因其固定)。
    */
   onCreate: (settings: Omit<ClientRoomSettingsData, 'maxPlayers'>) => void; 
+  /** @param {(message: string, type: NotificationType, duration?: number) => void} addNotification - 用於顯示通知的函數。 */
+  addNotification: (message: string, type: NotificationType, duration?: number) => void;
 }
 
 /**
@@ -26,7 +27,7 @@ interface CreateRoomModalProps {
  * @param {CreateRoomModalProps} props - 組件的屬性。
  * @returns {React.FC | null} React 函數組件，或在 isOpen 為 false 時返回 null。
  */
-const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCreate }) => {
+const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCreate, addNotification }) => {
   // --- 狀態管理 ---
   /** @description 房間名稱的狀態。 */
   const [roomName, setRoomName] = useState('');
@@ -45,8 +46,8 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
   const handleSubmit = () => {
     // 驗證房間名稱是否為空
     if (roomName.trim() === '') {
-      alert('請輸入房間名稱！');
-      return;
+      addNotification('房間名稱不能為空！', 'warning'); // 使用傳入的 addNotification 函數
+      return; // 停留在模態框，不關閉也不創建
     }
     // 呼叫 onCreate 回調函數，傳遞房間設定
     onCreate({
@@ -56,6 +57,8 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
       fillWithAI: true, // 若真人玩家不足，則總是嘗試用 AI 補齊 (伺服器端會根據 humanPlayers 和 maxPlayersFixed 計算 AI 數量)
       numberOfRounds: numberOfRounds, // 總局數
     });
+    // 創建成功或失敗的提示將由 App.tsx 在收到伺服器回應後透過 addNotification 顯示
+    // 此處不需要再做提示
   };
 
   // 如果模態框未開啟，則不渲染任何內容
@@ -77,6 +80,7 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500 text-slate-100 placeholder-slate-400"
             placeholder="例如：我的麻將房"
             maxLength={20} // 最大長度限制
+            required // 標記為必填
           />
         </div>
 
