@@ -14,8 +14,8 @@ import {
     MAX_HAND_SIZE_BEFORE_DISCARD, ACTION_TIMER_INTERVAL_MS, EMPTY_ROOM_TIMEOUT_MS, GAME_END_EMPTY_ROOM_TIMEOUT_MS,
     TILE_KIND_DETAILS, MAX_MESSAGE_LOG_ENTRIES, AI_NAME_PREFIX, DEFAULT_NUMBER_OF_ROUNDS,
     LOBBY_ROOM_NAME,
-    PLAYABLE_TILE_KINDS, 
-    TILES_PER_KIND 
+    PLAYABLE_TILE_KINDS,
+    TILES_PER_KIND
 } from './constants';
 // 引入牌堆管理相關輔助函數
 import { createInitialDeck, shuffleDeck, dealTiles, sortHandVisually } from './utils/deckManager';
@@ -159,7 +159,7 @@ export class GameRoom {
     this.gameState.numberOfRounds = this.roomSettings.numberOfRounds; // 確保同步
 
     // 重置所有玩家的本局狀態 (手牌、面子)
-    this.players.forEach((p) => { 
+    this.players.forEach((p) => {
         p.hand = [];
         p.melds = [];
         console.debug(`[GameRoom ${this.roomId}] 本局初始化: 玩家 ${p.id} (${p.name}) - 真人: ${p.isHuman}, 莊家: ${p.isDealer}`); // Log level adjusted
@@ -192,7 +192,7 @@ export class GameRoom {
     const { hands, remainingDeck } = dealTiles(
         this.gameState.deck,
         this.gameState.players, // 使用 this.players (ServerPlayer[]) 進行發牌邏輯
-        this.gameState.dealerIndex, 
+        this.gameState.dealerIndex,
         INITIAL_HAND_SIZE_DEALER,
         INITIAL_HAND_SIZE_NON_DEALER
     );
@@ -203,72 +203,103 @@ export class GameRoom {
     });
     this.gameState.deck = remainingDeck; // 更新剩餘牌堆
 
-    // --- BEGIN ADDED LOGGING ---
-    // 日誌：發牌完成，開始驗證手牌與剩餘牌堆
+    // --- BEGIN ADDED LOGGING & ID VALIDATION ---
     this.addLog("發牌完成。驗證手牌與剩餘牌堆...");
-    console.debug(`[GameRoom ${this.roomId}] 第 ${this.gameState.currentRound} 局 - 發牌後驗證:`); // Log level adjusted
-    const overallCounts = new Map<TileKind, number>(); // 用於統計所有牌（手牌+牌堆）中每種牌的總數
+    console.debug(`[GameRoom ${this.roomId}] 第 ${this.gameState.currentRound} 局 - 發牌後驗證:`);
+    const overallKindCounts = new Map<TileKind, number>();
+    const allTilesInGameForIdCheck: Tile[] = []; // 用於全局ID唯一性檢查
 
-    this.players.forEach(p => { // 遍歷每個玩家
-        // 日誌：記錄玩家ID、名稱及其手牌數量
-        console.debug(`  玩家 ${p.id} (${p.name}) 手牌 (${p.hand.length} 張):`); // Log level adjusted
-        const handCounts = new Map<TileKind, number>(); // 用於統計該玩家手牌中每種牌的數量
-        p.hand.forEach(tile => { // 遍歷玩家的每張手牌
-            handCounts.set(tile.kind, (handCounts.get(tile.kind) || 0) + 1); // 統計手牌中牌的種類和數量
-            overallCounts.set(tile.kind, (overallCounts.get(tile.kind) || 0) + 1); // 同時更新總計數
+    this.players.forEach(p => {
+        console.debug(`  玩家 ${p.id} (${p.name}) 手牌 (${p.hand.length} 張):`);
+        allTilesInGameForIdCheck.push(...p.hand); // 將玩家手牌加入全局檢查列表
+        const handKindCounts = new Map<TileKind, number>();
+        const handTileIds = new Set<string>(); // 追蹤當前玩家手牌中的ID
+        p.hand.forEach(tile => {
+            // 檢查牌物件是否存在且有效
+            if (!tile || !tile.id || !tile.kind) {
+                console.error(`    !!!! 嚴重錯誤 !!!! 玩家 ${p.id} (${p.name}) 手牌中發現無效的牌物件: ${JSON.stringify(tile)}`);
+                this.addLog(`嚴重錯誤: 玩家 ${p.name} 手牌中發現無效牌!`);
+                return; // 跳過此無效牌的後續處理
+            }
+
+            handKindCounts.set(tile.kind, (handKindCounts.get(tile.kind) || 0) + 1);
+            overallKindCounts.set(tile.kind, (overallKindCounts.get(tile.kind) || 0) + 1);
+            if (handTileIds.has(tile.id)) { // 檢查此玩家手牌內ID是否重複
+                console.error(`    !!!! 嚴重錯誤 !!!! 玩家 ${p.id} (${p.name}) 手牌中出現重複ID的牌: ${tile.id} (${tile.kind})！`);
+                this.addLog(`嚴重錯誤：玩家 ${p.name} 手牌中出現重複ID的牌: ${tile.id} (${tile.kind})！`);
+            }
+            handTileIds.add(tile.id);
         });
-        handCounts.forEach((count, kind) => { // 遍歷手牌計數結果
-            // 日誌：記錄手牌中每種牌的種類和數量
-            console.debug(`    ${kind}: ${count}`); // Log level adjusted
-            if (count > TILES_PER_KIND) { // 如果某種牌的數量超過了預期（TILES_PER_KIND，通常為4）
-                // 嚴重錯誤日誌：記錄玩家ID、牌種和實際數量
-                console.error(`    !!!! 嚴重錯誤 !!!! 玩家 ${p.id} 手牌中出現 ${count} 張 ${kind}！`); // Log level adjusted
+        handKindCounts.forEach((count, kind) => {
+            console.debug(`    ${kind}: ${count}`);
+            if (count > TILES_PER_KIND) {
+                console.error(`    !!!! 嚴重錯誤 !!!! 玩家 ${p.id} (${p.name}) 手牌中出現 ${count} 張 ${kind}！`);
                 this.addLog(`嚴重錯誤：玩家 ${p.name} 手牌中出現 ${count} 張 ${kind}！`);
             }
         });
     });
 
-    // 日誌：記錄剩餘牌堆的牌數
-    console.debug(`  剩餘牌堆 (${this.gameState.deck.length} 張):`); // Log level adjusted
-    const deckCounts = new Map<TileKind, number>(); // 用於統計剩餘牌堆中每種牌的數量
-    this.gameState.deck.forEach(tile => { // 遍歷剩餘牌堆中的每張牌
-        deckCounts.set(tile.kind, (deckCounts.get(tile.kind) || 0) + 1); // 統計牌堆中牌的種類和數量
-        overallCounts.set(tile.kind, (overallCounts.get(tile.kind) || 0) + 1); // 更新總計數
+    console.debug(`  剩餘牌堆 (${this.gameState.deck.length} 張):`);
+    allTilesInGameForIdCheck.push(...this.gameState.deck); // 將牌堆加入全局ID檢查列表
+    const deckKindCounts = new Map<TileKind, number>();
+    this.gameState.deck.forEach(tile => {
+        // 檢查牌物件是否存在且有效
+        if (!tile || !tile.id || !tile.kind) {
+            console.error(`    !!!! 嚴重錯誤 !!!! 牌堆中發現無效的牌物件: ${JSON.stringify(tile)}`);
+            this.addLog(`嚴重錯誤: 牌堆中發現無效牌!`);
+            return; // 跳過此無效牌的後續處理
+        }
+        deckKindCounts.set(tile.kind, (deckKindCounts.get(tile.kind) || 0) + 1);
+        overallKindCounts.set(tile.kind, (overallKindCounts.get(tile.kind) || 0) + 1);
     });
-    deckCounts.forEach((count, kind) => { // 遍歷牌堆計數結果
-        // 日誌：記錄牌堆中每種牌的種類和數量
-        console.debug(`    ${kind}: ${count}`); // Log level adjusted
+    deckKindCounts.forEach((count, kind) => {
+        console.debug(`    ${kind}: ${count}`);
     });
 
-    // 日誌：開始驗證遊戲中所有牌的總數
-    console.debug(`  遊戲中各種牌的總數 (手牌 + 牌堆):`); // Log level adjusted
-    let allOverallCountsCorrect = true; // 標記總數是否全部正確
-    PLAYABLE_TILE_KINDS.forEach(kind => { // 遍歷所有可玩的牌種
-        const totalCount = overallCounts.get(kind) || 0; // 獲取該牌種的總計數
-        // 日誌：記錄每種牌的總數
-        console.debug(`    ${kind}: ${totalCount}`); // Log level adjusted
-        if (totalCount !== TILES_PER_KIND) { // 如果總數不等於預期（TILES_PER_KIND）
-            // 嚴重錯誤日誌：記錄牌種、實際總數和預期總數
-            console.error(`    !!!! 嚴重錯誤 !!!! ${kind} 的總數為 ${totalCount}，應為 ${TILES_PER_KIND}。`); // Log level adjusted
+    console.debug(`  遊戲中各種牌的總數 (手牌 + 牌堆):`);
+    let allOverallKindCountsCorrect = true;
+    PLAYABLE_TILE_KINDS.forEach(kind => {
+        const totalCount = overallKindCounts.get(kind) || 0;
+        console.debug(`    ${kind}: ${totalCount}`);
+        if (totalCount !== TILES_PER_KIND) {
+            console.error(`    !!!! 嚴重錯誤 !!!! ${kind} 的總數為 ${totalCount}，應為 ${TILES_PER_KIND}。`);
             this.addLog(`嚴重錯誤：遊戲中 ${kind} 總數為 ${totalCount}，應為 ${TILES_PER_KIND}！`);
-            allOverallCountsCorrect = false; // 標記為不正確
+            allOverallKindCountsCorrect = false;
         }
     });
-    if (allOverallCountsCorrect) { // 如果所有牌的總數都正確
-        // 日誌：確認總數正確
-        console.debug(`  所有牌的總數已驗證正確。`); // Log level adjusted
-    } else { // 如果有牌的總數不正確
-        // 錯誤日誌：總數驗證失敗
-        console.error(`  所有牌的總數驗證失敗。`); // Log level adjusted
+    if (allOverallKindCountsCorrect) {
+        console.debug(`  所有牌的種類總數已驗證正確。`);
+    } else {
+        console.error(`  所有牌的種類總數驗證失敗。`);
     }
-    // --- END ADDED LOGGING ---
+
+    // 全局ID唯一性檢查
+    console.debug(`  驗證遊戲中所有牌的ID唯一性...`);
+    const allEncounteredTileIds = new Set<string>();
+    let duplicateIdFoundOverall = false;
+    for (const tile of allTilesInGameForIdCheck) {
+        if (!tile || !tile.id) continue; // 跳過無效牌物件
+        if (allEncounteredTileIds.has(tile.id)) {
+            console.error(`    !!!! 嚴重錯誤 !!!! 遊戲中檢測到重複的牌ID: ${tile.id} (${tile.kind})`);
+            this.addLog(`嚴重錯誤：遊戲中檢測到重複的牌ID: ${tile.id} (${tile.kind})`);
+            duplicateIdFoundOverall = true;
+        }
+        allEncounteredTileIds.add(tile.id);
+    }
+    if (!duplicateIdFoundOverall) {
+        console.debug(`  所有牌的ID已驗證唯一。總獨立ID數: ${allEncounteredTileIds.size} (理論應為 ${PLAYABLE_TILE_KINDS.length * TILES_PER_KIND})`);
+    } else {
+        console.error(`  所有牌的ID唯一性驗證失敗。`);
+    }
+    // --- END ADDED LOGGING & ID VALIDATION ---
+
 
     this.updateGameStatePlayers(); // 再次更新 gameState.players 以包含手牌和日誌驗證後的狀態
 
     // 設定初始回合玩家為莊家
-    this.gameState.currentPlayerIndex = this.gameState.dealerIndex; 
-    const dealerPlayer = this.players.find(p => p.id === this.gameState.dealerIndex); 
-    
+    this.gameState.currentPlayerIndex = this.gameState.dealerIndex;
+    const dealerPlayer = this.players.find(p => p.id === this.gameState.dealerIndex);
+
     if(!dealerPlayer) { // 防禦性檢查：莊家是否存在
         console.error(`[GameRoom ${this.roomId}] 嚴重錯誤: 發牌後找不到莊家 (ID: ${this.gameState.dealerIndex})。遊戲無法繼續。`); // Log level adjusted
         this.addLog("嚴重錯誤：找不到莊家，遊戲無法繼續。");
@@ -344,19 +375,19 @@ export class GameRoom {
     this.sortPlayersById(); // 確保 this.players 是排序的
     // 映射 this.players 到 gameState.players，並進行深拷貝及手牌隱藏處理
     this.gameState.players = this.players.map(p => ({
-        id: p.id, 
+        id: p.id,
         name: p.name,
         isHuman: p.isHuman,
         // 手牌顯示邏輯：
         // 1. 如果是真人玩家且在線，或者遊戲/本局已結束，或者正在等待再戰投票，則顯示真實手牌。
         // 2. 否則 (AI玩家，或離線/非主視角的真人玩家且遊戲進行中)，顯示隱藏的牌 (牌背)。
-        hand: (p.isHuman && p.isOnline) || 
-              (this.gameState.gamePhase === GamePhase.GAME_OVER || 
+        hand: (p.isHuman && p.isOnline) ||
+              (this.gameState.gamePhase === GamePhase.GAME_OVER ||
                this.gameState.gamePhase === GamePhase.ROUND_OVER ||
                this.gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES)
               ? [...p.hand] // 深拷貝真實手牌
               // 創建一個長度與手牌相同的陣列，內容為佔位的牌物件 (代表牌背)
-              : Array(p.hand.length).fill({id:`hidden-${p.id}-${Math.random()}`, kind: TileKind.B_SOLDIER, suit: Suit.BLACK} as Tile), 
+              : Array(p.hand.length).fill({id:`hidden-${p.id}-${Math.random()}`, kind: TileKind.B_SOLDIER, suit: Suit.BLACK} as Tile),
         melds: p.melds.map(m => ({...m, tiles: [...m.tiles]})), // 深拷貝面子
         isDealer: p.isDealer,
         score: p.score,
@@ -372,7 +403,7 @@ export class GameRoom {
     return this.roomSettings;
   }
 
-  /** 
+  /**
    * @description 獲取當前完整的遊戲狀態 (深拷貝)。
    *              確保遊戲狀態中的房間相關設定是最新的。
    */
@@ -380,9 +411,9 @@ export class GameRoom {
     this.updateGameStatePlayers(); // 確保 gameState.players 是最新的
     // 創建遊戲狀態的深拷貝副本，並更新其中可能從 roomSettings 變動的欄位
     const currentFullGameState = {
-        ...JSON.parse(JSON.stringify(this.gameState)), 
-        roomName: this.roomSettings.roomName, 
-        configuredHumanPlayers: this.roomSettings.humanPlayers, 
+        ...JSON.parse(JSON.stringify(this.gameState)),
+        roomName: this.roomSettings.roomName,
+        configuredHumanPlayers: this.roomSettings.humanPlayers,
         configuredFillWithAI: this.roomSettings.fillWithAI,
         hostPlayerName: this.roomSettings.hostName,
         numberOfRounds: this.roomSettings.numberOfRounds, // 確保這裡是最新的
@@ -396,12 +427,12 @@ export class GameRoom {
   }
 
   /** @description 檢查房間的真人玩家名額是否已滿。 */
-  public isFull(): boolean { 
+  public isFull(): boolean {
     return this.players.filter(p => p.isHuman && p.isOnline).length >= this.roomSettings.humanPlayers;
   }
 
    /** @description 檢查房間內是否沒有在線的真人玩家。 */
-  public isEmpty(): boolean { 
+  public isEmpty(): boolean {
     return this.players.filter(p => p.isHuman && p.isOnline).length === 0;
   }
 
@@ -518,7 +549,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     }
 
     // 如果是全新玩家 (不是恢復離線座位)，則創建新的 ServerPlayer 物件
-    if (!offlineHumanPlayerByName) { 
+    if (!offlineHumanPlayerByName) {
         const newPlayer = new ServerPlayer(assignedSeatIndex, playerName, true, socket.id, isHost);
         this.players.push(newPlayer); // 加入到房間玩家列表
         this.sortPlayersById();       // 排序玩家列表
@@ -529,7 +560,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         }
         console.info(`[GameRoom ${this.roomId}] 新玩家 ${playerName} (ID: ${newPlayer.id}) 已加入座位 ${assignedSeatIndex}。`); // Log level adjusted
     }
-    
+
     // 獲取最終確認的玩家物件 (無論是新建還是恢復的)
     const finalPlayerObject = this.players.find(p => p.id === assignedSeatIndex)!;
     socket.data.currentRoomId = this.roomId; // 在 socket 上記錄當前房間ID
@@ -541,7 +572,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     if (this.gameState.gamePhase === GamePhase.LOADING || this.gameState.gamePhase === GamePhase.WAITING_FOR_PLAYERS) {
         this.gameState.gamePhase = GamePhase.WAITING_FOR_PLAYERS;
     }
-    
+
     // 向加入的玩家發送 joinedRoom 事件，包含初始遊戲狀態和其客戶端ID
     this.io.to(socket.id).emit('joinedRoom', { gameState: this.getGameState(), roomId: this.roomId, clientPlayerId: finalPlayerObject.id });
     this.addLog(`${playerName} (座位: ${finalPlayerObject.id}) 已加入房間。`);
@@ -591,9 +622,9 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
             this.handlePlayerActionTimeout(removedPlayer.id, timerType, true); // isOffline = true
         }
         // 如果房間內已無在線真人玩家，則提前結束遊戲並解散房間
-        if (this.isEmpty()) { 
+        if (this.isEmpty()) {
             this.addLog(`所有真人玩家均已離開，遊戲提前結束並解散房間。`);
-            this.gameState.gamePhase = GamePhase.GAME_OVER; 
+            this.gameState.gamePhase = GamePhase.GAME_OVER;
             this.gameState.matchOver = true; // 標記比賽結束
             this.broadcastGameState(); // 廣播最後狀態
             if (this.emptyRoomTimer) { clearTimeout(this.emptyRoomTimer); this.emptyRoomTimer = null; }
@@ -607,7 +638,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
             // *** 修改點結束 ***
 
             this.onRoomEmptyCallback(); // 觸發房間關閉回調
-            return; 
+            return;
         }
     } else if (this.gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES && removedPlayer.isHuman) { // 如果是在再戰投票階段真人玩家離開
         this.addLog(`${removedPlayer.name} 在再戰投票階段離開。`);
@@ -643,7 +674,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         this.players.splice(playerIndexInArray, 1); // 直接從玩家列表中移除
         this.addLog(`${removedPlayer.name} 已離開房間。`);
         this.io.to(this.roomId).emit('gamePlayerLeft', { playerId: removedPlayer.id, message: `${removedPlayer.name} 已離開房間。` });
-        
+
         // 如果離開的是真人玩家，且房間因此變空
         if (removedPlayer.isHuman && this.isEmpty()) {
             if (this.gameState.gamePhase === GamePhase.WAITING_FOR_PLAYERS) { // 等待階段房間空了
@@ -656,7 +687,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
                 }
                 // *** 修改點結束 ***
                 this.onRoomEmptyCallback(); // 關閉房間
-                return; 
+                return;
             } else if (this.gameState.gamePhase === GamePhase.ROUND_OVER) { // 本局結束階段房間空了
                 this.addLog(`所有真人玩家已於本局結束階段離開，取消下一局並準備關閉房間。`);
                 this.clearNextRoundTimer(); // 清除下一局倒數
@@ -670,19 +701,19 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
             }
         }
     }
-    
+
     // 如果離開的玩家是房主，且房間内還有其他在線真人玩家，則指派新房主
     if (removedPlayer.isHost && this.players.some(p => p.isHuman && p.isOnline)) {
         this.assignNewHost();
     }
-    
+
     this.sortPlayersById(); // 重新排序玩家列表
     this.updateGameStatePlayers(); // 更新遊戲狀態中的玩家資訊
     this.broadcastGameState();     // 廣播遊戲狀態
 
     // 重置空房計時器，如果遊戲已結束或本局結束，使用較短的超時
     this.resetEmptyRoomTimer(this.gameState.gamePhase === GamePhase.GAME_OVER || this.gameState.gamePhase === GamePhase.ROUND_OVER || this.gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES);
-    
+
     // 清理該 socket 的房間相關資料
     const clientSocket = this.io.sockets.sockets.get(socketId);
     if(clientSocket) {
@@ -741,8 +772,8 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     }
 
     // 在房主請求開始遊戲時，才初始化AI玩家以填補空位
-    this.initializeAIPlayers(); 
-    
+    this.initializeAIPlayers();
+
     // 再次檢查，確保AI填充後總玩家數達到 NUM_PLAYERS
     if (this.players.length < NUM_PLAYERS) {
         this.io.to(socketId).emit('gameError', `需要 ${NUM_PLAYERS} 位玩家才能開始遊戲 (AI填充後仍不足)。`);
@@ -866,7 +897,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
              this.gameState.gamePhase === GamePhase.PLAYER_DRAWN ||
              this.gameState.gamePhase === GamePhase.AWAITING_DISCARD)) {
            this.startActionTimerForPlayer(player.id);
-           this.broadcastGameState(); 
+           this.broadcastGameState();
         } else if (player.id === this.gameState.playerMakingClaimDecision &&
                    (this.gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION ||
                     this.gameState.gamePhase === GamePhase.ACTION_PENDING_CHI_CHOICE)) {
@@ -900,13 +931,13 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
 
     const drawnTile = this.gameState.deck.shift()!; // 從牌堆頂部摸一張牌
     this.gameState.lastDrawnTile = drawnTile; // 記錄剛摸到的牌
-    
+
     this.gameState.gamePhase = GamePhase.PLAYER_DRAWN; // 更新遊戲階段為 "玩家已摸牌"
     // 記錄日誌 (對真人玩家顯示摸到的牌，對AI不顯示)
-    this.addLog(`${player.name} (座位: ${player.id}) 摸了一張牌${player.isHuman && player.isOnline ? ` (${drawnTile.kind})` : ''}。`); 
+    this.addLog(`${player.name} (座位: ${player.id}) 摸了一張牌${player.isHuman && player.isOnline ? ` (${drawnTile.kind})` : ''}。`);
     this.startActionTimerForPlayer(playerId); // 為該玩家啟動行動計時器
     // 如果摸牌的是AI或離線玩家，立即廣播狀態 (真人玩家可能因計時器啟動而收到廣播)
-    if (!player.isHuman || !player.isOnline) this.broadcastGameState(); 
+    if (!player.isHuman || !player.isOnline) this.broadcastGameState();
     return true;
   }
 
@@ -920,68 +951,96 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     const player = this.players.find(p => p.id === playerId); // 找到打牌玩家
     if (!player) { console.error(`[GameRoom ${this.roomId}] processDiscardTile: 玩家 ${playerId} 未找到。`); return false; } // Log level adjusted
 
-    // 檢查是否輪到此玩家打牌且遊戲階段正確 (已摸牌或等待出牌)
-    if (this.gameState.currentPlayerIndex !== playerId ||
-        (this.gameState.gamePhase !== GamePhase.PLAYER_DRAWN && this.gameState.gamePhase !== GamePhase.AWAITING_DISCARD)) {
+    // 檢查遊戲階段是否正確
+    const isValidPhaseForDiscard =
+        this.gameState.gamePhase === GamePhase.PLAYER_DRAWN ||
+        (this.gameState.gamePhase === GamePhase.AWAITING_DISCARD && this.gameState.currentPlayerIndex === playerId);
+
+    if (!isValidPhaseForDiscard) {
         if(player.socketId) this.io.to(player.socketId).emit('gameError', '還沒輪到你打牌或遊戲階段不正確。');
         return false;
     }
 
-    let tileToDiscard: Tile | null = null; // 要打出的牌
-    let handAfterDiscard = [...player.hand]; // 複製手牌用於操作
+    let tileToDiscard: Tile | null = null;
+    let handAfterAction = [...player.hand]; // 手牌副本
 
-    // 情況1：打出的是剛摸到的牌 (PLAYER_DRAWN 階段)
-    if (this.gameState.lastDrawnTile && this.gameState.lastDrawnTile.id === tileId && this.gameState.gamePhase === GamePhase.PLAYER_DRAWN) {
-        tileToDiscard = this.gameState.lastDrawnTile; // 直接使用剛摸的牌
-        this.gameState.lastDrawnTile = null; // 清除 lastDrawnTile
-    } else { // 情況2：打出的是原手牌中的一張
-        const tileIndexInHand = player.hand.findIndex(t => t.id === tileId); // 在原手牌中查找
-        if (tileIndexInHand === -1) { // 如果找不到
+    // 情況1：玩家剛摸牌 (PLAYER_DRAWN)，選擇打出剛摸的牌
+    if (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile && this.gameState.lastDrawnTile.id === tileId) {
+        tileToDiscard = this.gameState.lastDrawnTile;
+        this.gameState.lastDrawnTile = null; // 剛摸的牌被打出，清除 lastDrawnTile
+        // handAfterAction 此時仍然是 player.hand (摸牌前的7張)，不需要改變
+    }
+    // 情況2：玩家剛摸牌 (PLAYER_DRAWN)，選擇打出手中的舊牌
+    else if (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile) {
+        const indexInHand = handAfterAction.findIndex(t => t.id === tileId);
+        if (indexInHand === -1) {
             if(player.socketId) this.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileId})。`);
             return false;
         }
-        tileToDiscard = player.hand[tileIndexInHand]; // 獲取要打的牌
-        handAfterDiscard.splice(tileIndexInHand, 1); // 從手牌副本中移除
-
-        // 如果是在 PLAYER_DRAWN 階段打原手牌，則剛摸的牌需要加入到手牌中
-        if (this.gameState.lastDrawnTile && this.gameState.gamePhase === GamePhase.PLAYER_DRAWN) { 
-            handAfterDiscard.push(this.gameState.lastDrawnTile);
-            this.gameState.lastDrawnTile = null; // 清除 lastDrawnTile
-        } 
-        // 如果是在 AWAITING_DISCARD 階段 (例如莊家開局，第8張牌存在 lastDrawnTile 中)，打出的是原7張之一
-        else if (this.gameState.gamePhase === GamePhase.AWAITING_DISCARD && this.gameState.lastDrawnTile) {
-            // 假設此時 lastDrawnTile 是莊家第8張牌，若打的是原7張牌之一，則第8張牌會加入手牌。
-            // 但 current logic for dealer: lastDrawnTile is set to the 8th card, gamePhase is AWAITING_DISCARD.
-            // If dealer discards one of the original 7, the 8th card (lastDrawnTile) must be added.
-            // If dealer discards the 8th card itself, then lastDrawnTile is cleared.
-            // The initial code for dealer:
-            // if (dealerPlayer.hand.length === INITIAL_HAND_SIZE_DEALER && dealerPlayer.hand.length > 0) {
-            //    this.gameState.lastDrawnTile = dealerPlayer.hand[dealerPlayer.hand.length - 1]; // lastDrawnTile is the 8th card
-            //    this.gameState.gamePhase = GamePhase.AWAITING_DISCARD;
-            // }
-            // So, if tileToDiscard is NOT lastDrawnTile, then lastDrawnTile should be added to hand.
-            if (tileToDiscard.id !== this.gameState.lastDrawnTile.id) {
-                handAfterDiscard.push(this.gameState.lastDrawnTile);
-            }
-            this.gameState.lastDrawnTile = null; // 清除 lastDrawnTile
+        tileToDiscard = handAfterAction.splice(indexInHand, 1)[0]; // 從手牌副本中移除
+        handAfterAction.push(this.gameState.lastDrawnTile); // 將剛摸的牌加入手牌副本
+        this.gameState.lastDrawnTile = null; // 清除 lastDrawnTile
+    }
+    // 情況3：莊家開局 (AWAITING_DISCARD)，或吃碰槓後打牌 (AWAITING_DISCARD)
+    else if (this.gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
+        // 莊家開局時，lastDrawnTile 是其第8張牌。
+        // 吃碰槓後，lastDrawnTile 應為 null。
+        const indexInHand = handAfterAction.findIndex(t => t.id === tileId);
+        if (indexInHand === -1) {
+            if(player.socketId) this.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileId})。`);
+            return false;
         }
+        tileToDiscard = handAfterAction.splice(indexInHand, 1)[0]; // 從手牌副本中移除
+
+        // 如果是莊家開局打的牌不是第8張牌 (lastDrawnTile)，則 lastDrawnTile (第8張牌) 實際上仍在 handAfterAction 中。
+        // 如果打的就是第8張牌，它已經被 splice 掉了。
+        // 無論如何，莊家打完第一張牌後，lastDrawnTile 狀態都應清除。
+        if (player.isDealer && this.gameState.turnNumber === 1 && this.gameState.lastDrawnTile) {
+            // 確保如果打出的不是 lastDrawnTile 本身，則手牌中不再重複計算它
+            // 實際上，handAfterAction 此時已經是正確的7張牌了，因為 player.hand 一開始就是8張
+        }
+        this.gameState.lastDrawnTile = null; // 清除 lastDrawnTile
+    } else { // 理論上不會進入此分支，因為 isValidPhaseForDiscard 已檢查
+        if(player.socketId) this.io.to(player.socketId).emit('gameError', '遊戲邏輯錯誤：不正確的打牌階段。');
+        return false;
     }
 
-    // 再次確認是否成功確定要打出的牌
     if (!tileToDiscard) {
         if(player.socketId) this.io.to(player.socketId).emit('gameError', '無法確定要打出的牌。');
         return false;
     }
 
-    player.hand = sortHandVisually(handAfterDiscard); // 更新玩家手牌並排序
-    this.gameState.discardPile.unshift(tileToDiscard); // 將打出的牌加入棄牌堆頂部
-    this.gameState.lastDiscardedTile = tileToDiscard; // 記錄最後棄牌
-    this.gameState.lastDiscarderIndex = playerId; // 記錄打牌者
+    player.hand = sortHandVisually(handAfterAction); // 更新玩家手牌
+    this.gameState.discardPile.unshift(tileToDiscard);
+    this.gameState.lastDiscardedTile = tileToDiscard;
+    this.gameState.lastDiscarderIndex = playerId;
 
     this.addLog(`${player.name} (座位: ${player.id}) 打出了 ${tileToDiscard.kind}。`);
-    this.broadcastActionAnnouncement(tileToDiscard.kind, playerId); // 廣播打牌宣告動畫
-    this.updateGameStatePlayers(); // 更新 gameState.players (因手牌變化)
-    this.checkForClaims(tileToDiscard, playerId); // 檢查其他玩家是否可以對此棄牌進行宣告
+    this.broadcastActionAnnouncement(tileToDiscard.kind, playerId);
+
+    // --- BEGIN ADDED LOGGING FOR DISCARD ---
+    const discardedPlayerForLog = this.players.find(p => p.id === playerId);
+    if (discardedPlayerForLog) {
+        const handIds = new Set<string>();
+        let duplicateIdInHandAfterDiscard = false;
+        console.debug(`[GameRoom ${this.roomId}] 玩家 ${discardedPlayerForLog.name} (ID:${playerId}) 打出 ${tileToDiscard.kind} (ID:${tileToDiscard.id}) 後，手牌 (${discardedPlayerForLog.hand.length}張):`);
+        discardedPlayerForLog.hand.forEach(t => {
+            console.debug(`    牌: ${t.kind}, ID: ${t.id}`);
+            if (handIds.has(t.id)) {
+                console.error(`    !!!! 嚴重錯誤 !!!! 手牌中出現重複ID: ${t.id} (${t.kind})`);
+                this.addLog(`嚴重錯誤: ${discardedPlayerForLog.name} 打牌後手牌重複ID: ${t.id}`);
+                duplicateIdInHandAfterDiscard = true;
+            }
+            handIds.add(t.id);
+        });
+        if (!duplicateIdInHandAfterDiscard) {
+            console.debug(`    手牌ID驗證唯一。`);
+        }
+    }
+    // --- END ADDED LOGGING FOR DISCARD ---
+
+    this.updateGameStatePlayers();
+    this.checkForClaims(tileToDiscard, playerId);
     return true;
   }
 
@@ -1031,7 +1090,7 @@ private processDeclareHu(playerId: number): boolean {
             handToCheck = [...player.hand, this.gameState.lastDrawnTile!]; // 手牌加上剛摸的牌
             actionTextForAnnouncement = "自摸";
         }
-    } 
+    }
     // 情況2：宣告別人打出的牌 (食胡)
     else if (this.gameState.lastDiscardedTile && // 必須有棄牌
                this.gameState.potentialClaims.some(c => c.playerId === playerId && c.action === 'Hu') && // 此玩家有胡牌宣告權
@@ -1040,7 +1099,7 @@ private processDeclareHu(playerId: number): boolean {
         winTile = this.gameState.lastDiscardedTile; // 胡的牌是棄牌
         handToCheck = [...player.hand, this.gameState.lastDiscardedTile]; // 手牌加上棄牌
         actionTextForAnnouncement = "胡";
-        
+
         // 檢查是否為一炮多響 (多個玩家胡同一張棄牌)
         const huClaimsForThisTile = this.gameState.potentialClaims.filter(c => c.action === 'Hu' && this.gameState.lastDiscardedTile && c.tiles && c.tiles.some(t => t.id === this.gameState.lastDiscardedTile!.id));
         if (huClaimsForThisTile.length > 1) {
@@ -1066,7 +1125,7 @@ private processDeclareHu(playerId: number): boolean {
             this.gameState.winningDiscardedTile = null;   // 自摸胡的不是棄牌
             // 如果胡的是剛摸的牌，則從 lastDrawnTile 中清除
             if (winTile && this.gameState.lastDrawnTile && winTile.id === this.gameState.lastDrawnTile.id) {
-                this.gameState.lastDrawnTile = null; 
+                this.gameState.lastDrawnTile = null;
             }
         } else { // 食胡相關處理
             huMessage += `食胡 (ロン了 ${this.players.find(p=>p.id === this.gameState.lastDiscarderIndex)?.name || '上家'} 的 ${winTile!.kind})`;
@@ -1074,7 +1133,7 @@ private processDeclareHu(playerId: number): boolean {
             this.gameState.winningDiscardedTile = winTile; // 記錄胡的棄牌
             // 從棄牌堆消耗掉被胡的牌
             if (this.gameState.lastDiscardedTile && this.gameState.lastDiscardedTile.id === winTile!.id) {
-                this.consumeDiscardedTileForMeld(winTile!.id); 
+                this.consumeDiscardedTileForMeld(winTile!.id);
             }
             player.hand.push(winTile!); // 將胡的牌加入手牌 (用於顯示完整牌型)
             player.hand = sortHandVisually(player.hand); // 排序手牌
@@ -1083,7 +1142,7 @@ private processDeclareHu(playerId: number): boolean {
         this.addLog(huMessage); // 記錄胡牌訊息
         // 廣播胡牌宣告動畫 (天胡、自摸或胡)，並標記是否為一炮多響
         this.broadcastActionAnnouncement(actionTextForAnnouncement, playerId, isMultiHuTarget);
-        
+
         this.updateGameStatePlayers(); // 更新遊戲狀態中的玩家資訊 (因手牌變化)
         this.handleRoundEndFlow(); // 處理局結束流程
     } else { // 如果未胡牌 (詐胡)
@@ -1092,14 +1151,14 @@ private processDeclareHu(playerId: number): boolean {
 
         // 如果是宣告別人棄牌時詐胡，則視為跳過宣告
         if (!isSelfDrawnHu && this.gameState.playerMakingClaimDecision === playerId) {
-             this.processPassClaim(playerId); 
-        } 
+             this.processPassClaim(playerId);
+        }
         // 如果是自摸時詐胡，則恢復遊戲階段並讓其繼續打牌
         else if (isSelfDrawnHu) {
             if (actionTextForAnnouncement === "天胡") { // 莊家天胡詐胡，回到等待出牌
-                this.gameState.gamePhase = GamePhase.AWAITING_DISCARD; 
+                this.gameState.gamePhase = GamePhase.AWAITING_DISCARD;
             } else { // 普通自摸詐胡，回到已摸牌
-                this.gameState.gamePhase = GamePhase.PLAYER_DRAWN; 
+                this.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
             }
             this.startActionTimerForPlayer(playerId); // 重新啟動計時器
             this.broadcastGameState(); // 廣播狀態
@@ -1230,7 +1289,7 @@ private processDeclareHu(playerId: number): boolean {
         // 如果是AI或離線玩家，則不啟動客戶端計時器 (AI行動由 processAITurnIfNeeded 處理)
         if (!player.isHuman || !player.isOnline) {
              console.debug(`[GameRoom ${this.roomId}] 不為 AI/離線玩家 ${player.name} (座位: ${playerId}) 啟動計時器。`); // Log level adjusted
-            return; 
+            return;
         }
 
         let timeoutDuration: number; // 計時器時長 (秒)
@@ -1264,7 +1323,7 @@ private processDeclareHu(playerId: number): boolean {
                 } else { // 如果行動權已轉移
                     this.addLog(`[GameRoom ${this.roomId}] 玩家 ${playerId} 的計時器到期，但行動權已轉移。清除過期計時器。`);
                     this.clearActionTimer(); // 清除過期計時器
-                    this.broadcastGameState(); 
+                    this.broadcastGameState();
                 }
             }
         }, ACTION_TIMER_INTERVAL_MS); // 每秒執行一次
@@ -1286,7 +1345,7 @@ private processDeclareHu(playerId: number): boolean {
         if (this.gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION && this.gameState.playerMakingClaimDecision !== null) {
             const player = this.players.find(p => p.id === this.gameState.playerMakingClaimDecision);
             if (player && (!player.isHuman || !player.isOnline) ) aiPlayerToAct = player;
-        } 
+        }
         // 判斷是否輪到AI/離線玩家的回合行動 (摸牌、打牌)
         else if (
             (this.gameState.gamePhase === GamePhase.PLAYER_TURN_START ||
@@ -1300,10 +1359,10 @@ private processDeclareHu(playerId: number): boolean {
 
 
         if (aiPlayerToAct) { // 如果確定有AI/離線玩家需要行動
-            const currentAIPlayer = aiPlayerToAct; 
+            const currentAIPlayer = aiPlayerToAct;
             this.addLog(`輪到 ${currentAIPlayer.name} (${currentAIPlayer.isHuman ? '離線真人':'AI'}, 座位: ${currentAIPlayer.id}) 行動，遊戲階段: ${this.gameState.gamePhase}`);
             console.debug(`[GameRoom ${this.roomId}] 安排 AI/離線玩家 ${currentAIPlayer.name} (座位: ${currentAIPlayer.id}) 在階段 ${this.gameState.gamePhase} 的行動。`); // Log level adjusted
-            
+
             // 設定延遲執行AI行動 (模擬思考時間)
             this.aiActionTimeout = setTimeout(() => {
                  // 再次確認是否仍輪到此AI/離線玩家行動 (防止狀態已改變)
@@ -1432,8 +1491,8 @@ private processDeclareHu(playerId: number): boolean {
     private processClaimChi(playerId: number, tilesToChiWith: Tile[], discardedTileToChi: Tile): boolean {
         const player = this.players.find(p => p.id === playerId);
         // 驗證宣告時機和條件
-        if (!player || this.gameState.playerMakingClaimDecision !== playerId || 
-            (this.gameState.gamePhase !== GamePhase.AWAITING_PLAYER_CLAIM_ACTION && this.gameState.gamePhase !== GamePhase.ACTION_PENDING_CHI_CHOICE) || 
+        if (!player || this.gameState.playerMakingClaimDecision !== playerId ||
+            (this.gameState.gamePhase !== GamePhase.AWAITING_PLAYER_CLAIM_ACTION && this.gameState.gamePhase !== GamePhase.ACTION_PENDING_CHI_CHOICE) ||
             !this.gameState.lastDiscardedTile || this.gameState.lastDiscardedTile.id !== discardedTileToChi.id) {
             if(player?.socketId) this.io.to(player.socketId).emit('gameError', '無效的吃牌宣告。');
             return false;
@@ -1496,16 +1555,16 @@ private processDeclareHu(playerId: number): boolean {
         if (!player) return false;
         // 檢查是否輪到此玩家且遊戲階段正確 (摸牌前或摸牌後)
         if (this.gameState.currentPlayerIndex !== playerId ||
-            (this.gameState.gamePhase !== GamePhase.PLAYER_TURN_START && this.gameState.gamePhase !== GamePhase.PLAYER_DRAWN && 
+            (this.gameState.gamePhase !== GamePhase.PLAYER_TURN_START && this.gameState.gamePhase !== GamePhase.PLAYER_DRAWN &&
             !(this.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && this.gameState.turnNumber === 1)) // 莊家開局第一回合特殊處理
            ) {
             if(player.socketId) this.io.to(player.socketId).emit('gameError', '現在不是宣告暗槓的時機。');
             return false;
         }
-        
+
         // 檢查手牌中是否有四張相同的牌
-        const handForAnGangCheck = (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile) 
-            ? [...player.hand, this.gameState.lastDrawnTile] 
+        const handForAnGangCheck = (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile)
+            ? [...player.hand, this.gameState.lastDrawnTile]
             : (this.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && this.gameState.turnNumber === 1 && this.gameState.lastDrawnTile)
             ? [...player.hand, this.gameState.lastDrawnTile] // 莊家開局，第8張牌在lastDrawnTile
             : player.hand;
@@ -1624,7 +1683,7 @@ private processDeclareHu(playerId: number): boolean {
 
             // 檢查是否所有在線真人玩家都已確認
             const onlineHumanPlayers = this.players.filter(p => p.isHuman && p.isOnline);
-            if (onlineHumanPlayers.length > 0 && 
+            if (onlineHumanPlayers.length > 0 &&
                 onlineHumanPlayers.every(p => this.gameState.humanPlayersReadyForNextRound.includes(p.id))) {
                 this.addLog("所有在線真人玩家已確認，提前開始下一局。");
                 this.clearNextRoundTimer(); // 清除倒數計時器
@@ -1709,7 +1768,7 @@ private processDeclareHu(playerId: number): boolean {
             }
         }
     }
-    
+
     /**
      * @description 當一張牌被打出後，檢查其他玩家是否可以對其進行宣告 (胡、碰、槓、吃)。
      * @param {Tile} discardedTile - 被打出的牌。
@@ -1769,7 +1828,7 @@ private processDeclareHu(playerId: number): boolean {
         // 找到最高優先順序的宣告者
         const highestPriorityClaim = this.gameState.potentialClaims[0];
         if (!highestPriorityClaim) { // 理論上不應發生，因為此函數在 potentialClaims > 0 時調用
-            this.advanceToNextPlayerTurn(true); 
+            this.advanceToNextPlayerTurn(true);
             return;
         }
         // 找到所有具有相同最高優先順序的宣告
@@ -1809,7 +1868,7 @@ private processDeclareHu(playerId: number): boolean {
             this.broadcastGameState(); // 廣播遊戲狀態
             this.processAITurnIfNeeded(); // 如果是AI，處理其行動
         } else { // 如果找不到該玩家 (理論上不應發生)
-            this.advanceToNextPlayerTurn(true); 
+            this.advanceToNextPlayerTurn(true);
         }
     }
 
@@ -1819,9 +1878,9 @@ private processDeclareHu(playerId: number): boolean {
      */
     private advanceToNextPlayerTurn(afterDiscard: boolean): void {
         this.clearClaimsAndTimer(); // 清除所有宣告和計時器
-        
+
         // 如果不是在棄牌後調用 (例如，是宣告被跳過後)，則不需要清除最後棄牌
-        if (afterDiscard) { 
+        if (afterDiscard) {
             this.gameState.lastDiscardedTile = null;
         }
 
@@ -1832,7 +1891,7 @@ private processDeclareHu(playerId: number): boolean {
 
         this.gameState.turnNumber++; // 回合數加一
         this.gameState.gamePhase = GamePhase.PLAYER_TURN_START; // 設定遊戲階段為等待摸牌
-        
+
         const nextPlayer = this.players.find(p => p.id === this.gameState.currentPlayerIndex);
         if(nextPlayer) {
             this.addLog(`輪到 ${nextPlayer.name} (座位: ${nextPlayer.id}) 摸牌。`);
@@ -1841,7 +1900,7 @@ private processDeclareHu(playerId: number): boolean {
         this.broadcastGameState(); // 廣播遊戲狀態
         this.processAITurnIfNeeded(); // 如果下一位是AI，處理其行動
     }
-    
+
     /**
      * @description 處理玩家行動超時的邏輯。
      * @param {number} playerId - 超時的玩家ID。
@@ -1867,8 +1926,8 @@ private processDeclareHu(playerId: number): boolean {
                 tileToDiscard = this.gameState.lastDrawnTile;
             } else if (player.hand.length > 0) { // 否則，從手牌中選擇一張打出
                 // AI 選擇策略：如果玩家離線或AI，用AI邏輯選牌；否則隨機選一張 (或選最後一張)
-                const handForDiscardChoice = (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile) 
-                        ? [...player.hand, this.gameState.lastDrawnTile] 
+                const handForDiscardChoice = (this.gameState.gamePhase === GamePhase.PLAYER_DRAWN && this.gameState.lastDrawnTile)
+                        ? [...player.hand, this.gameState.lastDrawnTile]
                         : player.hand;
                 if (isOffline || !player.isHuman) {
                     tileToDiscard = this.aiService.chooseDiscardForTimeoutOrOffline(handForDiscardChoice, this.getGameState());
@@ -1959,13 +2018,13 @@ private processDeclareHu(playerId: number): boolean {
         this.gameState.matchOver = true; // 標記比賽已結束
         this.gameState.gamePhase = GamePhase.AWAITING_REMATCH_VOTES; // 進入等待再戰投票階段
         this.addLog(`所有 ${this.roomSettings.numberOfRounds} 局已完成，比賽結束！`);
-        
+
         // 初始化再戰投票狀態
         this.gameState.rematchVotes = this.players
             .filter(p => p.isHuman && p.isOnline) // 只為在線真人玩家初始化
             .map(p => ({ playerId: p.id, vote: 'pending' }));
         this.gameState.rematchCountdown = REMATCH_VOTE_TIMEOUT_SECONDS;
-        
+
         console.info(`[GameRoom ${this.roomId}] 比賽結束，進入再戰投票階段。在線真人玩家數: ${this.players.filter(p=>p.isHuman && p.isOnline).length}`); // Log level adjusted
         this.broadcastGameState(); // 廣播最終結果和再戰投票狀態
 
@@ -1992,7 +2051,7 @@ private processDeclareHu(playerId: number): boolean {
             this.addLog("再戰投票時間到。");
         }
 
-        const agreedHumanPlayers = this.players.filter(p => 
+        const agreedHumanPlayers = this.players.filter(p =>
             p.isHuman && p.isOnline && this.gameState.rematchVotes?.find(v => v.playerId === p.id && v.vote === 'yes')
         );
         const onlineHumanPlayers = this.players.filter(p => p.isHuman && p.isOnline);
@@ -2000,9 +2059,9 @@ private processDeclareHu(playerId: number): boolean {
         // 條件：所有在線的真人玩家都必須同意
         if (onlineHumanPlayers.length > 0 && agreedHumanPlayers.length === onlineHumanPlayers.length) {
             this.addLog("所有在線真人玩家同意再戰！準備開始新的一場比賽。");
-            
+
             // 重置玩家列表，只保留同意的真人玩家
-            this.players = agreedHumanPlayers; 
+            this.players = agreedHumanPlayers;
             // 如果同意的玩家中有原房主，則其繼續為房主；否則重新指派
             const originalHostAgreed = agreedHumanPlayers.find(p => p.socketId === this.roomSettings.hostSocketId);
             if (originalHostAgreed) {
@@ -2023,7 +2082,7 @@ private processDeclareHu(playerId: number): boolean {
             });
 
             this.initializeAIPlayers(); // 根據剩餘真人玩家填充AI
-            
+
             // 再次檢查填充AI後人數是否足夠
             if (this.players.length < NUM_PLAYERS) {
                  this.addLog(`同意再戰的玩家加上AI後人數不足 ${NUM_PLAYERS}。比賽無法開始，房間關閉。`);
@@ -2070,7 +2129,7 @@ private processDeclareHu(playerId: number): boolean {
             this.aiActionTimeout = null;
         }
     }
-    
+
     /**
      * @description 向房間內所有客戶端廣播一個動作宣告的視覺特效。
      * @param {string} text - 宣告的文字 (例如："碰", "胡", 或牌面)。
