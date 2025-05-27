@@ -1,10 +1,11 @@
+
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { GamePhase, Tile } from '../types';
 import {
     CLAIM_DECISION_TIMEOUT_SECONDS, PLAYER_TURN_ACTION_TIMEOUT_SECONDS,
     ACTION_TIMER_INTERVAL_MS as TIMER_INTERVAL, NEXT_ROUND_COUNTDOWN_SECONDS,
-    REMATCH_VOTE_TIMEOUT_SECONDS
+    REMATCH_VOTE_TIMEOUT_SECONDS, MAX_ROUND_DURATION_SECONDS // 引入全局單局超時秒數
 } from '../constants';
 import * as PlayerActionHandler from './playerActionHandler';
 import * as RoundHandler from './roundHandler'; // For startGameRound
@@ -113,34 +114,39 @@ export const handlePlayerActionTimeout = (room: GameRoom, playerId: number, time
         let tileToDiscard: Tile | null = null;
 
         // 決定要打哪張牌
-        if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile) {
-            // 如果是剛摸牌後超時，優先打出剛摸的牌
-            tileToDiscard = room.gameState.lastDrawnTile;
-        } else if (player.hand.length > 0) {
-            // 如果手牌不為空，選擇一張牌打出
+        if (isOffline || !player.isHuman) { // AI 或離線真人玩家
             const handForDiscardChoice = (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile)
-                ? [...player.hand, room.gameState.lastDrawnTile] // 包含剛摸的牌
-                : player.hand; // 僅手牌
-
-            if (isOffline || !player.isHuman) {
-                // 如果是AI或離線玩家，使用AI服務選擇棄牌
-                tileToDiscard = room.aiService.chooseDiscardForTimeoutOrOffline(handForDiscardChoice, room.getGameState());
-            } else {
-                // 真人玩家超時，隨機打出一張手牌 (如果沒有剛摸的牌)
-                // 如果有剛摸的牌，上面已處理。此處應是 AWAITING_DISCARD 階段。
-                tileToDiscard = player.hand[Math.floor(Math.random() * player.hand.length)];
+                ? [...player.hand, room.gameState.lastDrawnTile]
+                : player.hand;
+            tileToDiscard = room.aiService.chooseDiscardForTimeoutOrOffline(handForDiscardChoice, room.getGameState());
+            
+            // AI服務選擇棄牌後的備用邏輯
+            if (!tileToDiscard) {
+                if (handForDiscardChoice.length > 0) {
+                     tileToDiscard = handForDiscardChoice[0]; // 從AI考慮的手牌中選第一張
+                     room.addLog(`AI (${player.name}) 棄牌選擇服務異常，系統選擇第一張牌 (${tileToDiscard?.kind}) 打出。`);
+                } else if (room.gameState.lastDrawnTile) { // 如果AI考慮的手牌為空 (例如手牌為空，且沒有把剛摸的牌納入考慮)
+                     tileToDiscard = room.gameState.lastDrawnTile; // 打出剛摸的牌
+                     room.addLog(`AI (${player.name}) 棄牌選擇服務異常且無手牌可選，系統選擇剛摸的牌 (${tileToDiscard?.kind}) 打出。`);
+                }
             }
-        }
-        // 再次檢查，如果上面邏輯未能選出牌，但有剛摸的牌，則使用它
-        if (!tileToDiscard && room.gameState.lastDrawnTile) {
-            tileToDiscard = room.gameState.lastDrawnTile;
+        } else { // 線上真人玩家超時
+            if (player.hand.length > 0) {
+                // 打出手牌中的最後一張 (最右邊的)
+                tileToDiscard = player.hand[player.hand.length - 1];
+                room.addLog(`系統為 ${player.name} 自動選擇打出其手牌中最右邊的牌 (${tileToDiscard.kind})。`);
+            } else if (room.gameState.lastDrawnTile) {
+                // 如果手牌為空 (例如剛吃碰槓完摸了一張)，則打出剛摸的牌
+                tileToDiscard = room.gameState.lastDrawnTile;
+                room.addLog(`系統為 ${player.name} 自動選擇打出剛摸到的牌 (${tileToDiscard.kind})，因其手牌為空。`);
+            }
         }
 
         if (tileToDiscard) {
             PlayerActionHandler.processDiscardTile(room, playerId, tileToDiscard.id); // 處理打牌
         } else {
             // 極端情況：超時且無牌可打
-            console.error(`[TimerManager ${room.roomId}] 玩家 ${player.name} 回合超時，但無牌可打！`);
+            console.error(`[TimerManager ${room.roomId}] 玩家 ${player.name} 回合超時，但無牌可打！手牌數: ${player.hand.length}, 剛摸的牌: ${room.gameState.lastDrawnTile?.kind}`);
             room.addLog(`嚴重錯誤: ${player.name} 無牌可打，遊戲可能卡住。`);
             room.gameState.isDrawGame = true; // 判為流局
             RoundHandler.handleRoundEndFlow(room); // 處理本局結束
@@ -214,4 +220,47 @@ export const clearRematchTimer = (room: GameRoom): void => {
         room.rematchTimerId = null;
     }
     room.gameState.rematchCountdown = null; // 重置倒數時間
+};
+
+/**
+ * @description 啟動全局單局超時計時器。
+ * @param {GameRoom} room - GameRoom 實例。
+ */
+export const startRoundTimeoutTimer = (room: GameRoom): void => {
+    clearRoundTimeoutTimer(room); // 清除已有的計時器
+    console.info(`[TimerManager ${room.roomId}] 全局單局超時計時器啟動 (${MAX_ROUND_DURATION_SECONDS}秒)。`);
+    room.roundTimeoutTimerId = setTimeout(() => {
+        handleRoundTimeout(room);
+    }, MAX_ROUND_DURATION_SECONDS * 1000);
+};
+
+/**
+ * @description 清除全局單局超時計時器。
+ * @param {GameRoom} room - GameRoom 實例。
+ */
+export const clearRoundTimeoutTimer = (room: GameRoom): void => {
+    if (room.roundTimeoutTimerId) {
+        clearTimeout(room.roundTimeoutTimerId);
+        room.roundTimeoutTimerId = null;
+        console.info(`[TimerManager ${room.roomId}] 全局單局超時計時器已清除。`);
+    }
+};
+
+/**
+ * @description 處理全局單局超時的邏輯。
+ * @param {GameRoom} room - GameRoom 實例。
+ */
+export const handleRoundTimeout = (room: GameRoom): void => {
+    clearRoundTimeoutTimer(room); // 清除計時器本身
+    // 確保遊戲還在進行中，避免在遊戲結束後錯誤觸發
+    if (room.gameState.gamePhase === GamePhase.GAME_OVER || room.gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES || room.gameState.matchOver) {
+        console.warn(`[TimerManager ${room.roomId}] 全局單局超時觸發，但遊戲已結束或等待再戰。忽略。`);
+        return;
+    }
+    
+    room.addLog("本局因全局時間限制已到，自動結束 (流局)。");
+    console.warn(`[TimerManager ${room.roomId}] 全局單局時間 (${MAX_ROUND_DURATION_SECONDS}秒) 已到，本局將以流局結束。`);
+    
+    room.gameState.isDrawGame = true; // 標記為流局
+    RoundHandler.handleRoundEndFlow(room); // 呼叫處理本局結束的流程 (這會廣播遊戲狀態)
 };

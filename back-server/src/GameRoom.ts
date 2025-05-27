@@ -59,6 +59,7 @@ export class GameRoom {
   public nextRoundTimerId: NodeJS.Timeout | null = null; 
   public rematchTimerId: NodeJS.Timeout | null = null; 
   public aiActionTimeoutId: NodeJS.Timeout | null = null; // AI 行動的延遲計時器 ID
+  public roundTimeoutTimerId: NodeJS.Timeout | null = null; // 全局單局超時計時器 ID
   
   public actionSubmitLock: Set<number> = new Set(); // 用於防止玩家重複提交動作的鎖 (儲存玩家ID)
 
@@ -696,6 +697,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         TimerManager.clearActionTimer(this);
         TimerManager.clearNextRoundTimer(this);
         TimerManager.clearRematchTimer(this);
+        TimerManager.clearRoundTimeoutTimer(this); // 清除全局單局超時計時器
         AIHandler.clearAiActionTimeout(this); // 清除 AI 專用的延遲計時器
         if (this.emptyRoomTimerId) {
             clearTimeout(this.emptyRoomTimerId);

@@ -1,3 +1,4 @@
+
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { GamePhase, TileKind, Tile } from '../types';
@@ -64,6 +65,7 @@ export const initializeOrResetGameForRound = (room: GameRoom, isNewMatch: boolea
     TimerManager.clearActionTimer(room); // 改用 TimerManager
     TimerManager.clearNextRoundTimer(room); // 改用 TimerManager
     TimerManager.clearRematchTimer(room); // 改用 TimerManager
+    // 全局單局計時器也會在 startGameRound 或 handleRoundEndFlow 中清除/啟動
     room.gameState.humanPlayersReadyForNextRound = [];
     room.gameState.rematchVotes = [];
 
@@ -217,6 +219,7 @@ export const startGameRound = (room: GameRoom, isNewMatch: boolean): void => {
 
     room.gameState.gamePhase = GamePhase.DEALING;
     initializeOrResetGameForRound(room, isNewMatch);
+    TimerManager.startRoundTimeoutTimer(room); // 啟動全局單局超時計時器
 };
 
 /**
@@ -225,6 +228,7 @@ export const startGameRound = (room: GameRoom, isNewMatch: boolean): void => {
  */
 export const handleRoundEndFlow = (room: GameRoom): void => {
     TimerManager.clearActionTimer(room); // 改用 TimerManager
+    TimerManager.clearRoundTimeoutTimer(room); // 清除全局單局超時計時器
     AIHandler.clearAiActionTimeout(room);
     room.gameState.gamePhase = GamePhase.ROUND_OVER;
 

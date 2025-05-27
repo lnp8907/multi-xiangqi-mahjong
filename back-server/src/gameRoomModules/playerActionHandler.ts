@@ -34,11 +34,11 @@ export const processDrawTile = (room: GameRoom, playerId: number): boolean => {
     }
 
     const drawnTile = room.gameState.deck.shift()!;
-    room.gameState.lastDrawnTile = drawnTile;
+    room.gameState.lastDrawnTile = drawnTile; // 暫存摸到的牌，待打牌時才正式加入手牌
     room.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
     room.addLog(`${player.name} (座位: ${player.id}) 摸了一張牌${player.isHuman && player.isOnline ? ` (${drawnTile.kind})` : ''}。`);
     TimerManager.startActionTimerForPlayer(room, playerId); 
-    if (!player.isHuman || !player.isOnline) room.broadcastGameState();
+    if (!player.isHuman || !player.isOnline) room.broadcastGameState(); // 如果是AI摸牌，則廣播狀態讓前端更新剩餘牌堆
     return true;
 };
 
@@ -46,10 +46,10 @@ export const processDrawTile = (room: GameRoom, playerId: number): boolean => {
  * @description 處理玩家打牌的邏輯。
  * @param {GameRoom} room - GameRoom 實例。
  * @param {number} playerId - 打牌的玩家ID。
- * @param {string} tileId - 要打出的牌的ID。
+ * @param {string} tileIdToDiscard - 要打出的牌的ID。
  * @returns {boolean} 動作是否成功。
  */
-export const processDiscardTile = (room: GameRoom, playerId: number, tileId: string): boolean => {
+export const processDiscardTile = (room: GameRoom, playerId: number, tileIdToDiscard: string): boolean => {
     const player = room.players.find(p => p.id === playerId);
     if (!player) { console.error(`[GameRoom ${room.roomId}] processDiscardTile: 玩家 ${playerId} 未找到。`); return false; }
 
@@ -62,57 +62,63 @@ export const processDiscardTile = (room: GameRoom, playerId: number, tileId: str
         return false;
     }
 
-    let tileToDiscard: Tile | null = null;
-    let handAfterAction = [...player.hand];
+    let tileToActuallyDiscard: Tile | null = null;
 
-    if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile && room.gameState.lastDrawnTile.id === tileId) {
-        tileToDiscard = room.gameState.lastDrawnTile;
-        room.gameState.lastDrawnTile = null;
+    if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile) {
+        if (room.gameState.lastDrawnTile.id === tileIdToDiscard) { // 打出剛摸的牌
+            tileToActuallyDiscard = room.gameState.lastDrawnTile;
+            // lastDrawnTile 已取出，手牌不變
+        } else { // 打出手中的牌，並將剛摸的牌加入手牌
+            tileToActuallyDiscard = player.removeTileFromHand(tileIdToDiscard);
+            if (tileToActuallyDiscard) {
+                player.addTileToHand(room.gameState.lastDrawnTile); // 將剛摸的牌加入手牌
+            } else {
+                if(player.socketId) room.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileIdToDiscard})。`);
+                return false;
+            }
+        }
+        room.gameState.lastDrawnTile = null; // 清空剛摸的牌
     }
-    else if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile) {
-        const indexInHand = handAfterAction.findIndex(t => t.id === tileId);
-        if (indexInHand === -1) {
-            if(player.socketId) room.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileId})。`);
+    else if (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD) { // 通常是吃碰槓後，或莊家開局
+        tileToActuallyDiscard = player.removeTileFromHand(tileIdToDiscard);
+        if (!tileToActuallyDiscard) {
+            if(player.socketId) room.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileIdToDiscard})。`);
             return false;
         }
-        tileToDiscard = handAfterAction.splice(indexInHand, 1)[0];
-        handAfterAction.push(room.gameState.lastDrawnTile);
-        room.gameState.lastDrawnTile = null;
-    }
-    else if (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
-        const indexInHand = handAfterAction.findIndex(t => t.id === tileId);
-        if (indexInHand === -1) {
-            if(player.socketId) room.io.to(player.socketId).emit('gameError', `在您的手中找不到要打出的牌 (ID: ${tileId})。`);
-            return false;
+        // 如果是莊家開局，lastDrawnTile 可能代表第8張牌，此時應清空
+        if (player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile?.id === tileIdToDiscard) {
+            room.gameState.lastDrawnTile = null;
+        } else if (player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile) {
+             // 莊家打出的是手牌中的一張，則 lastDrawnTile (第8張) 應該已經加入手牌
+             // Player.addTileToHand 應該在發牌時處理好
         }
-        tileToDiscard = handAfterAction.splice(indexInHand, 1)[0];
-        if (player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile) {
-            // No specific action needed here for lastDrawnTile, it's handled by clearing below
-        }
+         // 無論如何，打牌後清除 lastDrawnTile
         room.gameState.lastDrawnTile = null;
     } else {
         if(player.socketId) room.io.to(player.socketId).emit('gameError', '遊戲邏輯錯誤：不正確的打牌階段。');
         return false;
     }
 
-    if (!tileToDiscard) {
+    if (!tileToActuallyDiscard) {
         if(player.socketId) room.io.to(player.socketId).emit('gameError', '無法確定要打出的牌。');
+        // 如果之前因 removeTileFromHand 失敗而返回，這裡可能不需要再次發送錯誤，但以防萬一
         return false;
     }
+    
+    player.hand = sortHandVisually(player.hand); // 打牌後對手牌進行排序
 
-    player.hand = sortHandVisually(handAfterAction);
-    room.gameState.discardPile.unshift(tileToDiscard);
-    room.gameState.lastDiscardedTile = tileToDiscard;
+    room.gameState.discardPile.unshift(tileToActuallyDiscard);
+    room.gameState.lastDiscardedTile = tileToActuallyDiscard;
     room.gameState.lastDiscarderIndex = playerId;
 
-    room.addLog(`${player.name} (座位: ${player.id}) 打出了 ${tileToDiscard.kind}。`);
-    room.broadcastActionAnnouncement(tileToDiscard.kind, playerId);
+    room.addLog(`${player.name} (座位: ${player.id}) 打出了 ${tileToActuallyDiscard.kind}。`);
+    room.broadcastActionAnnouncement(tileToActuallyDiscard.kind, playerId);
 
     const discardedPlayerForLog = room.players.find(p => p.id === playerId);
     if (discardedPlayerForLog) {
         const handIds = new Set<string>();
         let duplicateIdInHandAfterDiscard = false;
-        console.debug(`[GameRoom ${room.roomId}] 玩家 ${discardedPlayerForLog.name} (ID:${playerId}) 打出 ${tileToDiscard.kind} (ID:${tileToDiscard.id}) 後，手牌 (${discardedPlayerForLog.hand.length}張):`);
+        console.debug(`[GameRoom ${room.roomId}] 玩家 ${discardedPlayerForLog.name} (ID:${playerId}) 打出 ${tileToActuallyDiscard.kind} (ID:${tileToActuallyDiscard.id}) 後，手牌 (${discardedPlayerForLog.hand.length}張):`);
         discardedPlayerForLog.hand.forEach(t => {
             console.debug(`    牌: ${t.kind}, ID: ${t.id}`);
             if (handIds.has(t.id)) {
@@ -128,7 +134,7 @@ export const processDiscardTile = (room: GameRoom, playerId: number, tileId: str
     }
 
     room.updateGameStatePlayers();
-    ClaimHandler.checkForClaims(room, tileToDiscard, playerId);
+    ClaimHandler.checkForClaims(room, tileToActuallyDiscard, playerId);
     return true;
 };
 
@@ -157,6 +163,7 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
         winTile = room.gameState.lastDrawnTile;
 
         if ((room.gameState.gamePhase === GamePhase.PLAYER_TURN_START || room.gameState.gamePhase === GamePhase.AWAITING_DISCARD) && player.isDealer && room.gameState.turnNumber === 1) {
+            // 天胡時，lastDrawnTile 代表的是初始發牌的第8張
             handToCheck = room.gameState.lastDrawnTile ? [...player.hand, room.gameState.lastDrawnTile] : [...player.hand];
              if(handToCheck.length !== INITIAL_HAND_SIZE_DEALER && player.isDealer && room.gameState.turnNumber === 1) {
                 console.warn(`[GameRoom ${room.roomId}] 天胡檢查時手牌數量 (${handToCheck.length}) 不正確，應為 ${INITIAL_HAND_SIZE_DEALER}。莊家: ${player.name}`);
@@ -175,7 +182,7 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
                (room.gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION || room.gameState.gamePhase === GamePhase.AWAITING_CLAIMS_RESOLUTION)) {
         isSelfDrawnHu = false;
         winTile = room.gameState.lastDiscardedTile;
-        handToCheck = [...player.hand, room.gameState.lastDiscardedTile];
+        handToCheck = [...player.hand, room.gameState.lastDiscardedTile]; // 食胡時，將棄牌加入手牌進行檢查
         actionTextForAnnouncement = "胡";
 
         const huClaimsForThisTile = room.gameState.potentialClaims.filter(c => c.action === 'Hu' && room.gameState.lastDiscardedTile && c.tiles && c.tiles.some(t => t.id === room.gameState.lastDiscardedTile!.id));
@@ -199,19 +206,26 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
             else huMessage += `自摸 (摸到 ${winTile?.kind || '牌'})`;
             room.gameState.winningTileDiscarderId = null;
             room.gameState.winningDiscardedTile = null;
+            // 自摸時，lastDrawnTile (即 winTile) 不應再放回手牌，它已經是手牌的一部分了
             if (winTile && room.gameState.lastDrawnTile && winTile.id === room.gameState.lastDrawnTile.id) {
-                room.gameState.lastDrawnTile = null;
+                room.gameState.lastDrawnTile = null; // 清除，因為它已被計入手牌
             }
-        } else {
+             // 天胡時，lastDrawnTile (第8張) 也被計入手牌
+             if(actionTextForAnnouncement === "天胡" && room.gameState.lastDrawnTile){
+                 player.addTileToHand(room.gameState.lastDrawnTile); // 確保第8張牌加入手牌
+                 room.gameState.lastDrawnTile = null;
+             }
+        } else { // 食胡
             huMessage += `食胡 (ロン了 ${room.players.find(p=>p.id === room.gameState.lastDiscarderIndex)?.name || '上家'} 的 ${winTile!.kind})`;
             room.gameState.winningTileDiscarderId = room.gameState.lastDiscarderIndex;
             room.gameState.winningDiscardedTile = winTile;
             if (room.gameState.lastDiscardedTile && room.gameState.lastDiscardedTile.id === winTile!.id) {
-                ClaimHandler.consumeDiscardedTileForMeld(room, winTile!.id);
+                ClaimHandler.consumeDiscardedTileForMeld(room, winTile!.id); // 從棄牌堆移除
             }
-            player.hand.push(winTile!);
-            player.hand = sortHandVisually(player.hand);
+            player.addTileToHand(winTile!); // 將胡的牌加入手牌
         }
+        player.hand = sortHandVisually(player.hand); // 排序最終手牌
+
         huMessage += "了！";
         room.addLog(huMessage);
         room.broadcastActionAnnouncement(actionTextForAnnouncement, playerId, isMultiHuTarget);
@@ -227,8 +241,15 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
         }
         else if (isSelfDrawnHu) {
             if (actionTextForAnnouncement === "天胡") {
+                // 天胡失敗，lastDrawnTile (第8張) 應加入手牌，等待打出
+                if (room.gameState.lastDrawnTile) {
+                    player.addTileToHand(room.gameState.lastDrawnTile);
+                    player.hand = sortHandVisually(player.hand);
+                    room.gameState.lastDrawnTile = null; // 已加入手牌
+                }
                 room.gameState.gamePhase = GamePhase.AWAITING_DISCARD;
             } else {
+                // 自摸失敗，lastDrawnTile 保持，等待打出
                 room.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
             }
             TimerManager.startActionTimerForPlayer(room, playerId); 
@@ -253,13 +274,16 @@ export const processClaimPeng = (room: GameRoom, playerId: number, tileToPeng: T
         return false;
     }
 
+    // 使用 removeTilesFromHand 工具函數，它處理從手牌副本中移除牌
     const { handAfterAction, newMeldTiles } = removeTilesFromHand(player.hand, tileToPeng.kind, 2);
     if (!newMeldTiles || newMeldTiles.length !== 2) {
         room.addLog(`錯誤: ${player.name} 無法碰 ${tileToPeng.kind}，手牌中該牌數量不足。`);
         ClaimHandler.handleInvalidClaim(room, player, 'Peng');
         return false;
     }
-    player.hand = handAfterAction;
+    player.hand = handAfterAction; // 更新玩家手牌
+    player.hand = sortHandVisually(player.hand); // 排序
+
     const pengMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
         designation: MeldDesignation.KEZI,
@@ -303,6 +327,8 @@ export const processClaimGang = (room: GameRoom, playerId: number, tileToGang: T
         return false;
     }
     player.hand = handAfterAction;
+    player.hand = sortHandVisually(player.hand);
+
     const gangMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
         designation: MeldDesignation.GANGZI,
@@ -318,7 +344,7 @@ export const processClaimGang = (room: GameRoom, playerId: number, tileToGang: T
     ClaimHandler.consumeDiscardedTileForMeld(room, tileToGang.id);
     ClaimHandler.clearClaimsAndTimer(room);
     room.gameState.currentPlayerIndex = player.id;
-    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
+    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START; // 槓牌後摸牌
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
@@ -364,9 +390,9 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
         return false;
     }
 
-    player.hand = handCopy;
+    player.hand = handCopy; // 更新手牌
+    player.hand = sortHandVisually(player.hand); // 排序
 
-    // --- MODIFICATION START: Ensure meld.tiles is in natural sequence order ---
     const threeTilesForShunzi: Tile[] = [...removedForChi, discardedTileToChi];
     let finalMeldTiles: Tile[] = [];
 
@@ -387,7 +413,6 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
         }
 
         if (isCurrentShunziDefMatch) {
-            // Arrange the actual three tiles according to the order in shunziDef
             finalMeldTiles = shunziDef.map(definedKind => 
                 threeTilesForShunzi.find(actualTile => actualTile.kind === definedKind)!
             );
@@ -396,15 +421,12 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
     }
 
     if (finalMeldTiles.length !== 3) {
-        // Fallback: If no SHUNZI_DEFINITION matched (should not happen if getChiOptions was correct),
-        // revert to sorting hand tiles and putting discarded in middle.
         console.error(`[PlayerActionHandler ${room.roomId}] 無法確定 ${discardedTileToChi.kind} 的順子定義。吃牌手牌: ${removedForChi.map(t=>t.kind).join(',')}. 將使用備用排序邏輯。`);
         const sortedHandTilesFallback = [...removedForChi].sort(
             (a, b) => TILE_KIND_DETAILS[a.kind].orderValue - TILE_KIND_DETAILS[b.kind].orderValue
         );
         finalMeldTiles = [sortedHandTilesFallback[0], discardedTileToChi, sortedHandTilesFallback[1]];
     }
-    // --- MODIFICATION END ---
     
     const chiMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
@@ -447,6 +469,7 @@ export const processDeclareAnGang = (room: GameRoom, playerId: number, tileKindT
         return false;
     }
 
+    // 組成檢查手牌，包含剛摸到的牌（如果有的話）
     const handForAnGangCheck = (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile)
         ? [...player.hand, room.gameState.lastDrawnTile]
         : (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile)
@@ -458,30 +481,37 @@ export const processDeclareAnGang = (room: GameRoom, playerId: number, tileKindT
         return false;
     }
 
+    // 實際從手牌中移除
     const { handAfterAction, newMeldTiles } = removeTilesFromHand(player.hand, tileKindToGang, 4);
-    if (!newMeldTiles) {
+    if (!newMeldTiles) { // 如果移除失敗 (理論上 countTilesOfKind 已檢查過)
          if(player.socketId) room.io.to(player.socketId).emit('gameError', `暗槓時移除手牌失敗。`);
         return false;
     }
     player.hand = handAfterAction;
 
+    // 如果是在 PLAYER_DRAWN 階段且剛摸的牌不是組成槓子的那張，則將其加回手牌
     if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile && room.gameState.lastDrawnTile.kind !== tileKindToGang) {
-        player.hand.push(room.gameState.lastDrawnTile);
-        player.hand = sortHandVisually(player.hand);
+        player.addTileToHand(room.gameState.lastDrawnTile);
     }
-    room.gameState.lastDrawnTile = null;
+    // 如果是莊家開局 AWAITING_DISCARD，且 lastDrawnTile (第8張) 不是槓子的一部分，也加回
+    else if (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile && room.gameState.lastDrawnTile.kind !== tileKindToGang) {
+        player.addTileToHand(room.gameState.lastDrawnTile);
+    }
+    
+    player.hand = sortHandVisually(player.hand);
+    room.gameState.lastDrawnTile = null; // 無論如何，暗槓後清除 lastDrawnTile，因為接下來是摸牌
 
     const anGangMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
         designation: MeldDesignation.GANGZI,
-        tiles: newMeldTiles,
-        isOpen: false,
+        tiles: newMeldTiles, // 這四張是從手牌中移除的
+        isOpen: false, // 暗槓
     };
     player.melds.push(anGangMeld);
     room.addLog(`${player.name} (座位: ${player.id}) 暗槓了 ${tileKindToGang}。請摸牌。`);
     room.broadcastActionAnnouncement("暗槓", playerId);
 
-    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
+    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START; // 暗槓後摸牌
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
@@ -514,14 +544,14 @@ export const processDeclareMingGangFromHand = (room: GameRoom, playerId: number,
     }
 
     player.melds[pengMeldIndex].designation = MeldDesignation.GANGZI;
-    player.melds[pengMeldIndex].tiles.push(room.gameState.lastDrawnTile);
+    player.melds[pengMeldIndex].tiles.push(room.gameState.lastDrawnTile); // 將剛摸的牌加入到面子中
     player.melds[pengMeldIndex].tiles.sort((a,b) => TILE_KIND_DETAILS[a.kind].orderValue - TILE_KIND_DETAILS[b.kind].orderValue);
 
-    room.gameState.lastDrawnTile = null;
+    room.gameState.lastDrawnTile = null; // 清除剛摸的牌
     room.addLog(`${player.name} (座位: ${player.id}) 加槓了 ${tileKindToGang}。請摸牌。`);
     room.broadcastActionAnnouncement("加槓", playerId);
 
-    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
+    room.gameState.gamePhase = GamePhase.PLAYER_TURN_START; // 加槓後摸牌
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
@@ -542,6 +572,8 @@ export const processPassClaim = (room: GameRoom, playerId: number): boolean => {
     }
     room.addLog(`${player.name} (座位: ${player.id}) 選擇跳過宣告。`);
     room.gameState.playerMakingClaimDecision = null;
-    TurnHandler.advanceToNextPlayerTurn(room, false);
+    // 跳過宣告後，應該推進到下一個玩家的回合，並且是基於上一個棄牌者
+    // 注意: 此處 afterDiscard 應為 true，因為我們是處理對棄牌的宣告的跳過
+    TurnHandler.advanceToNextPlayerTurn(room, true); 
     return true;
 };

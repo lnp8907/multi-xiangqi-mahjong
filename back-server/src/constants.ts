@@ -70,21 +70,23 @@ export const ACTION_PRIORITY = {
 /** @description 玩家非回合宣告的思考/行動時間 (秒)。GameState 中的 actionTimer 以秒為單位。 */
 export const CLAIM_DECISION_TIMEOUT_SECONDS = 30; 
 /** @description 玩家回合內行動的思考/行動時間 (秒)。 */
-export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 60; 
+export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 30; 
 /** @description AI 思考時間的最小值 (毫秒)。 */
-export const AI_THINK_TIME_MS_MIN = 700; 
+export const AI_THINK_TIME_MS_MIN = 100; 
 /** @description AI 思考時間的最大值 (毫秒)。 */
-export const AI_THINK_TIME_MS_MAX = 2000; 
+export const AI_THINK_TIME_MS_MAX = 3000; 
 /** @description 計時器更新間隔 (毫秒)，例如每秒更新一次。 */
 export const ACTION_TIMER_INTERVAL_MS = 1000;
 /** @description 空房間自動關閉的超時時間 (毫秒)，例如 5 分鐘。 */
-export const EMPTY_ROOM_TIMEOUT_MS = 5 * 60 * 1000; 
+export const EMPTY_ROOM_TIMEOUT_MS = 1 * 60 * 1000; 
 /** @description 遊戲結束後，若房間變空，則在此超時後關閉房間 (毫秒)，例如 1 分鐘。 */
 export const GAME_END_EMPTY_ROOM_TIMEOUT_MS = 1 * 60 * 1000; 
 /** @description 下一局開始倒數秒數。GameState 中的 nextRoundCountdown 以秒為單位。 */
 export const NEXT_ROUND_COUNTDOWN_SECONDS = 10; 
 /** @description 再戰投票的超時時間 (秒)。 */
 export const REMATCH_VOTE_TIMEOUT_SECONDS = 20;
+/** @description 全局單局最大持續時間 (秒)，例如 5 分鐘。 */
+export const MAX_ROUND_DURATION_SECONDS = 600; // 5 分鐘 (可調整)
 
 
 // --- 設定選項相關常數 ---
@@ -163,3 +165,28 @@ export const LOG_LEVEL_NAMES: { [key: string]: LogLevel } = {
 export const DEFAULT_LOG_DIRECTORY = "C:/Users/lnp89/Downloads/mut-xiangqi-mahjong-log";
 /** @description 預設的日誌輸出級別。 */
 export const DEFAULT_LOG_LEVEL: LogLevel = LogLevel.DEBUG;
+
+// 新增：前端聊天室中用於識別系統訊息的發送者名稱
+// (與後端 SYSTEM_SENDER_NAME 區分，因前端可能需要不同顯示)
+export const SYSTEM_SENDER_NAME_FRONTEND = '系統訊息';
+
+/** 
+ * @description 用於音效模擬的牌面台語/中文名稱。
+ * (此常數已移至 constants.ts，若其他檔案有重複定義應移除)
+ */
+export const TAIWANESE_HOKKIEN_TILE_NAMES: Readonly<Record<TileKind, string>> = {
+  [TileKind.B_GENERAL]: '將',
+  [TileKind.B_ADVISOR]: '士',
+  [TileKind.B_ELEPHANT]: '象',
+  [TileKind.B_CHARIOT]: '車',
+  [TileKind.B_HORSE]: '馬',
+  [TileKind.B_CANNON]: '包',
+  [TileKind.B_SOLDIER]: '卒',
+  [TileKind.R_GENERAL]: '帥',
+  [TileKind.R_ADVISOR]: '仕',
+  [TileKind.R_ELEPHANT]: '相',
+  [TileKind.R_CHARIOT]: '俥',
+  [TileKind.R_HORSE]: '傌',
+  [TileKind.R_CANNON]: '炮',
+  [TileKind.R_SOLDIER]: '兵',
+};

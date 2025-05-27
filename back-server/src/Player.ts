@@ -1,5 +1,8 @@
 
 import { Tile, Meld, Player as PlayerInterface, Claim } from './types'; // 引入類型定義
+// sortHandVisually is not typically available directly in the server-side Player model
+// If sorting is needed internally, it should be a server-side utility or passed in.
+// For now, methods will just add/remove, sorting will be handled by calling code if necessary.
 
 /**
  * @class ServerPlayer
@@ -53,8 +56,30 @@ export class ServerPlayer implements PlayerInterface {
     this.pendingClaims = []; // 初始化空宣告列表
   }
 
-  // 可在此處添加伺服器端玩家相關的特定方法，例如：
-  // addTileToHand(tile: Tile) {
-  //   this.hand.push(tile);
-  // }
+  /**
+   * @description 向玩家手牌中添加一張牌。
+   * @param {Tile} tile - 要添加的牌。
+   */
+  public addTileToHand(tile: Tile): void {
+    this.hand.push(tile);
+    // 注意：此處不自動排序，排序邏輯由調用方 (例如 PlayerActionHandler) 在適當時機處理。
+    console.debug(`[Player ${this.id}] 將牌 ${tile.kind} (ID: ${tile.id}) 加入手牌。新手牌數: ${this.hand.length}`);
+  }
+
+  /**
+   * @description 從玩家手牌中移除指定ID的牌。
+   * @param {string} tileId - 要移除的牌的ID。
+   * @returns {Tile | null} 如果找到並移除，返回被移除的牌；否則返回 null。
+   */
+  public removeTileFromHand(tileId: string): Tile | null {
+    const tileIndex = this.hand.findIndex(t => t.id === tileId);
+    if (tileIndex !== -1) {
+      const removedTile = this.hand.splice(tileIndex, 1)[0];
+      // 注意：此處不自動排序，排序邏輯由調用方處理。
+      console.debug(`[Player ${this.id}] 從手牌移除牌 ${removedTile.kind} (ID: ${removedTile.id})。新手牌數: ${this.hand.length}`);
+      return removedTile;
+    }
+    console.warn(`[Player ${this.id}] 嘗試移除手牌中的牌 ID ${tileId}，但未找到。`);
+    return null;
+  }
 }
