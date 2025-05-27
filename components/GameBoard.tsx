@@ -15,7 +15,7 @@ import NextRoundConfirmModal from './NextRoundConfirmModal';
 import ActionAnnouncer, { ActionAnnouncement } from './ActionAnnouncer'; 
 import ProgressBar from './ProgressBar'; 
 // 引入類型定義和常數
-import { Tile, GamePhase, Claim, TileKind, Player, GameState, RoomSettings, ChatMessage, ServerToClientEvents, ClientToServerEvents, GameActionPayload, Suit, RematchVote } from '../types'; 
+import { Tile, GamePhase, Claim, TileKind, Player, GameState, RoomSettings, ChatMessage, ServerToClientEvents, ClientToServerEvents, GameActionPayload, Suit, RematchVote, DiscardedTileInfo } from '../types'; 
 import { TILE_KIND_DETAILS, GamePhaseTranslations, INITIAL_HAND_SIZE_DEALER, PLAYER_TURN_ACTION_TIMEOUT_SECONDS, CLAIM_DECISION_TIMEOUT_SECONDS, NUM_PLAYERS, ALL_TILE_KINDS as TILE_KIND_ENUM_VALUES, NEXT_ROUND_COUNTDOWN_SECONDS } from '../constants'; 
 // 引入遊戲規則相關的輔助函數 (主要用於 UI 判斷，伺服器為權威)
 import { canDeclareAnGang, canDeclareMingGangFromHand, checkWinCondition, getChiOptions } from '../utils/gameRules'; 
@@ -237,7 +237,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
       }
     }
     prevLastDrawnTileRef.current = currentLDT; // 更新記錄的上一次摸到的牌
-  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.lastDrawnTile, gameState.turnNumber, selectedTileId, gameState.dealerIndex, gameState.players]); // 依賴項
+  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.lastDrawnTile, gameState.turnNumber, selectedTileId, gameState.dealerIndex, gameState.players]); // 依賴項 (gameState.players 加入以確保玩家資訊最新)
 
   /**
    * @description 向伺服器發送玩家動作。
@@ -644,17 +644,19 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {/* 棄牌堆顯示 */}
             <div className="w-full flex flex-col items-center my-2">
                 <div className="h-[230px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
+                {/* 修改: 遍歷 DiscardedTileInfo[]，並使用 discardInfo.tile 進行渲染 */}
                 {gameState.discardPile
-                .slice() // 複製陣列以避免修改原狀態
-                .reverse() // 反轉陣列，使最新棄牌顯示在最前面 (視覺上)
-                .map((tile, index, reversedArray) => (
-                    <div key={`${tile.id}-discard-wrapper-${index}`} className="m-0.5">
+                .slice() 
+                .reverse() 
+                .map((discardInfo: DiscardedTileInfo, index: number, reversedArray: DiscardedTileInfo[]) => (
+                    <div key={`${discardInfo.tile.id}-discard-wrapper-${index}`} className="m-0.5">
                     <TileDisplay 
-                        tile={tile} 
+                        tile={discardInfo.tile} // 使用 discardInfo.tile
                         size="medium" 
-                        isDiscarded // 標記為棄牌
-                        // 最新棄牌的判斷：是反轉後陣列的第一個，且其ID與 gameState.lastDiscardedTile?.id 相符
-                        isLatestDiscard={index === reversedArray.length - 1 && gameState.lastDiscardedTile?.id === tile.id} 
+                        isDiscarded 
+                        isLatestDiscard={index === reversedArray.length - 1 && gameState.lastDiscardedTile?.id === discardInfo.tile.id} 
+                        // 此處可以添加 title 屬性來顯示 discardInfo.discarderId (如果需要)
+                        // title={`打出者ID: ${discardInfo.discarderId}`} 
                     />
                     </div>
                 ))}
@@ -744,13 +746,13 @@ const GameBoard: React.FC<GameBoardProps> = ({
             onQuitGame={onQuitGame} // 退出遊戲回調
             players={gameState.players} // 房間內玩家列表 (來自伺服器)
             roomSettings={{ // 房間設定 (從 gameState 和初始 roomSettings 組合)
-                id: gameState.roomId,
+                id: gameState.roomId!,
                 roomName: roomSettings.roomName,
                 maxPlayers: roomSettings.maxPlayers,
                 humanPlayers: roomSettings.humanPlayers,
                 fillWithAI: roomSettings.fillWithAI,
-                playerName: roomSettings.playerName, // 房主名稱
-                numberOfRounds: gameState.numberOfRounds || NEXT_ROUND_COUNTDOWN_SECONDS,
+                hostName: roomSettings.hostName,
+                numberOfRounds: roomSettings.numberOfRounds,
             }}
             isHost={!!isHumanHost} // 是否為房主
             dealerName={gameState.players.find(p => p.isDealer)?.name} // 莊家名稱 (若已決定)
@@ -802,7 +804,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
         />
       )}
 
-       {/* 比賽結束後的再戰投票彈窗 */}
+       {/* 比賽結束后的再戰投票彈窗 */}
       <GameModal
         isOpen={gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES}
         title={gameOverModalTitle} // 例如 "比賽結束 (共 N 局)"
@@ -871,7 +873,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
       {/* 遊戲結束 (最終) 彈窗 - 只有在 matchOver 且不是 AWAITING_REMATCH_VOTES 時顯示 */}
       <GameModal
-        // Fix: Remove redundant gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES
         isOpen={gameState.gamePhase === GamePhase.GAME_OVER && gameState.matchOver}
         title={gameOverModalTitle}
         onClose={undefined} 
@@ -889,7 +890,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         isOpen={ // 彈窗開啟條件
             isSelectingChiCombo && // 本地狀態控制是否嘗試開啟
             gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION && // 伺服器等待此玩家做宣告決定
-            // Fix: Correct typo from playerMakingClaimDecision to playerMakingClaimDecision
             playerMakingDecision?.id === clientPlayerId && // 確實是此客戶端在做決定
             Array.isArray(gameState.chiOptions) && gameState.chiOptions.length > 0 && // 伺服器提供了可吃的選項
             !!gameState.lastDiscardedTile // 有棄牌可吃

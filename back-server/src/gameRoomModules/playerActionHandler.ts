@@ -2,7 +2,7 @@
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { ServerPlayer } from '../Player';
-import { Tile, TileKind, Meld, MeldDesignation, GamePhase } from '../types'; // SHUNZI_DEFINITIONS was removed from here
+import { Tile, TileKind, Meld, MeldDesignation, GamePhase, DiscardedTileInfo } from '../types'; // SHUNZI_DEFINITIONS was removed from here, DiscardedTileInfo added
 import { INITIAL_HAND_SIZE_DEALER, TILE_KIND_DETAILS, SHUNZI_DEFINITIONS } from '../constants'; // SHUNZI_DEFINITIONS added here, TILE_KIND_DETAILS might still be needed
 import { sortHandVisually } from '../utils/deckManager'; 
 import { removeTilesFromHand, countTilesOfKind, checkWinCondition } from '../utils/gameRules';
@@ -107,8 +107,10 @@ export const processDiscardTile = (room: GameRoom, playerId: number, tileIdToDis
     
     player.hand = sortHandVisually(player.hand); // 打牌後對手牌進行排序
 
-    room.gameState.discardPile.unshift(tileToActuallyDiscard);
-    room.gameState.lastDiscardedTile = tileToActuallyDiscard;
+    // 修改: 將 DiscardedTileInfo 物件加入棄牌堆
+    const discardedInfo: DiscardedTileInfo = { tile: tileToActuallyDiscard, discarderId: playerId };
+    room.gameState.discardPile.unshift(discardedInfo);
+    room.gameState.lastDiscardedTile = tileToActuallyDiscard; // lastDiscardedTile 仍儲存 Tile 物件本身
     room.gameState.lastDiscarderIndex = playerId;
 
     room.addLog(`${player.name} (座位: ${player.id}) 打出了 ${tileToActuallyDiscard.kind}。`);

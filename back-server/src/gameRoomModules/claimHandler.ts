@@ -1,4 +1,3 @@
-
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { ServerPlayer } from '../Player';
@@ -157,7 +156,7 @@ export const consumeDiscardedTileForMeld = (room: GameRoom, tileId: string): voi
         room.gameState.lastDiscardedTile = null; // 清除最新棄牌標記
     } else {
         // 如果不是最新棄牌 (理論上不應發生在常規碰吃槓流程，除非有特殊規則或錯誤)
-        const indexToRemove = room.gameState.discardPile.findIndex(t => t.id === tileId);
+        const indexToRemove = room.gameState.discardPile.findIndex(info => info.tile.id === tileId);
         if (indexToRemove !== -1) {
             room.gameState.discardPile.splice(indexToRemove, 1); // 從棄牌堆中移除
         } else {
@@ -165,4 +164,3 @@ export const consumeDiscardedTileForMeld = (room: GameRoom, tileId: string): voi
         }
     }
 };
-    

@@ -1,5 +1,3 @@
-
-
 // 定義牌的顏色 (黑、紅)
 export enum Suit {
   BLACK = 'Black', // 黑色
@@ -124,6 +122,14 @@ export interface RematchVote {
 }
 
 /**
+ * @description 棄牌堆中單個項目的詳細資訊結構
+ */
+export interface DiscardedTileInfo {
+  tile: Tile;         // 牌物件本身
+  discarderId: number; // 打出此牌的玩家 ID (座位索引)
+}
+
+/**
  * @description 定義整個遊戲的狀態結構 (客戶端與伺服器端同步的核心數據)
  */
 export interface GameState {
@@ -131,7 +137,7 @@ export interface GameState {
   roomName: string; // 房間的名稱 (來自初始設定)
   players: Player[];             // 所有玩家的列表 (按座位索引排序)
   deck: Tile[];                  // 牌堆中剩餘的牌
-  discardPile: Tile[];           // 棄牌堆 (通常最新棄牌在最前面或最後面，依實現)
+  discardPile: DiscardedTileInfo[]; // 修改: 棄牌堆，儲存更詳細的棄牌資訊
   currentPlayerIndex: number;    // 當前回合的玩家索引 (相對於 players 陣列)
   dealerIndex: number;           // 莊家的索引 (相對於 players 陣列)
   lastDiscarderIndex: number | null;    // 上一個打出牌的玩家索引
@@ -197,7 +203,7 @@ export interface RoomSettings {
   humanPlayers: number; // 真人玩家數量 (創建時的設定)
   aiPlayers?: number; // AI 玩家數量 (伺服器計算後填入，客戶端主要用於顯示)
   fillWithAI: boolean; // 若 humanPlayers < maxPlayers，是否用 AI 填滿
-  playerName: string; // 創建此房間的玩家名稱 (房主名稱)
+  hostName: string; // 房主名稱
   password?: string; // 房間密碼 (可選)
   numberOfRounds?: number; // 總局數 (改為可選)
   hostSocketId?: string; // (僅伺服器端使用) 房主的 socket ID

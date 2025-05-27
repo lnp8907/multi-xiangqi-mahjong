@@ -1,6 +1,6 @@
 
 // 引入遊戲相關類型定義
-import { GameState, Player, Tile, TileKind, Meld, GameActionPayload, Claim, GamePhase, AIExecutableAction } from './types';
+import { GameState, Player, Tile, TileKind, Meld, GameActionPayload, Claim, GamePhase, AIExecutableAction, DiscardedTileInfo } from './types';
 // 引入遊戲常數
 import { TILE_KIND_DETAILS, ACTION_PRIORITY } from './constants';
 // 引入遊戲規則相關的輔助函數
@@ -32,16 +32,17 @@ const isIsolatedTileGroup = (kind: TileKind): boolean => {
 const estimateTileDanger = (tileToDiscard: Tile, gameState: GameState): number => {
   let danger = 0; // 初始危險度
   // 檢查這張牌在棄牌堆中已出現的次數
-  const occurrencesInDiscard = gameState.discardPile.filter(t => t.kind === tileToDiscard.kind).length;
+  // 修改: 從 discardInfo.tile.kind 獲取牌的種類
+  const occurrencesInDiscard = gameState.discardPile.filter(info => info.tile.kind === tileToDiscard.kind).length;
 
   // 棄牌堆中出現次數越少，代表越可能是生張，危險度越高
-  if (occurrencesInDiscard === 0) danger += 5;      // 未見過，高度危險
+  if (occurrencesInDiscard === 0) danger += 6;      // 未見過，高度危險
   else if (occurrencesInDiscard === 1) danger += 3; // 已見一張，中度危險
   else if (occurrencesInDiscard === 2) danger += 1; // 已見兩張，相對安全
 
   // 象棋牌中，某些關鍵牌（將帥、車馬炮等，即非 group 0 的牌）通常更容易被其他玩家需要
   if (TILE_KIND_DETAILS[tileToDiscard.kind].group !== 0) {
-    danger += 2; // 非兵卒牌，增加一些危險度
+    danger += 3; // 非兵卒牌，增加一些危險度
   }
   return danger;
 };
@@ -53,8 +54,9 @@ const estimateTileDanger = (tileToDiscard: Tile, gameState: GameState): number =
  */
 const getGlobalDiscardFrequency = (gameState: GameState): Record<string, number> => {
   const frequencyMap: Record<string, number> = {}; // 初始化頻率映射
-  gameState.discardPile.forEach(tile => { // 遍歷棄牌堆
-    frequencyMap[tile.kind] = (frequencyMap[tile.kind] || 0) + 1; // 累加計數
+  // 修改: 從 discardInfo.tile.kind 獲取牌的種類
+  gameState.discardPile.forEach(discardInfo => { // 遍歷棄牌堆
+    frequencyMap[discardInfo.tile.kind] = (frequencyMap[discardInfo.tile.kind] || 0) + 1; // 累加計數
   });
   return frequencyMap;
 };

@@ -152,7 +152,7 @@ export class GameRoom {
             const seatIsOccupied = this.players.some(p => p.id === i); 
             if (!seatIsOccupied) { 
                 const aiName = `${AI_NAME_PREFIX}${String.fromCharCode(65 + aiNameCounter)}`;
-                const aiPlayer = new ServerPlayer(i, aiName, false, null, false);
+                const aiPlayer = new ServerPlayer(i, aiName, false, undefined, false);
                 this.players.push(aiPlayer);
                 this.addLog(`${aiName} (AI, 座位 ${i}) 已加入遊戲。`);
                 console.info(`[GameRoom ${this.roomId}] AI 玩家 ${aiName} (ID: ${i}) 加入。`); 
@@ -194,7 +194,7 @@ export class GameRoom {
         isDealer: p.isDealer,
         score: p.score,
         isOnline: p.isOnline,
-        socketId: p.socketId, 
+        socketId: p.socketId === null ? undefined : p.socketId, // 將 null 轉換為 undefined
         pendingClaims: p.pendingClaims ? [...p.pendingClaims] : [], 
         isHost: p.isHost,
     }));

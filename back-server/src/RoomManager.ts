@@ -1,4 +1,3 @@
-
 // 引入 Socket.IO 相關類型
 import { Server, Socket } from 'socket.io';
 // 引入遊戲房間類別
@@ -29,28 +28,28 @@ export class RoomManager {
    * @description 創建一個新的遊戲房間。
    * @param {Socket} socket - 創建房間的玩家的 Socket 連接實例。
    * @param {Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }} clientSettings - 客戶端提交的房間設定及創建者名稱。
-   * @param {(ack: { success: boolean; roomId?: string; message?: string }) => void} callback - 操作完成後的回調函數。
+   * @param {(ack: { success: boolean; roomId?: string; message?: string }) => void} [callback] - 操作完成後的回調函數 (變為可選)。
    */
   public createRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
                     clientSettings: Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }, 
-                    callback: (ack: { success: boolean; roomId?: string; message?: string }) => void): void {
+                    callback?: (ack: { success: boolean; roomId?: string; message?: string }) => void): void { // callback 變為可選
     
     // 獲取房主名稱，優先使用客戶端提交的，其次是 socket.data 中的，最後是預設名稱
     const hostNameFromClient = clientSettings.playerName || socket.data.playerName || DEFAULT_HOST_NAME; 
 
     // 驗證房間名稱
     if (!clientSettings.roomName || clientSettings.roomName.trim().length === 0 || clientSettings.roomName.length > MAX_ROOM_NAME_LENGTH) {
-        callback({ success: false, message: `房間名稱無效或過長 (最多 ${MAX_ROOM_NAME_LENGTH} 字元)` });
+        if (callback) callback({ success: false, message: `房間名稱無效或過長 (最多 ${MAX_ROOM_NAME_LENGTH} 字元)` });
         return;
     }
     // 驗證房間密碼長度
     if (clientSettings.password && clientSettings.password.length > MAX_PASSWORD_LENGTH) {
-        callback({ success: false, message: `房間密碼過長 (最多 ${MAX_PASSWORD_LENGTH} 字元)` });
+        if (callback) callback({ success: false, message: `房間密碼過長 (最多 ${MAX_PASSWORD_LENGTH} 字元)` });
         return;
     }
     // 驗證真人玩家數量設定
     if (clientSettings.humanPlayers < 1 || clientSettings.humanPlayers > NUM_PLAYERS) {
-        callback({ success: false, message: `真人玩家數量設定無效 (1-${NUM_PLAYERS})`});
+        if (callback) callback({ success: false, message: `真人玩家數量設定無效 (1-${NUM_PLAYERS})`});
         return;
     }
 
@@ -90,12 +89,12 @@ export class RoomManager {
     const addSuccess = gameRoom.addPlayer(socket, hostNameFromClient, true); // isHost = true
 
     if (addSuccess) { // 如果房主成功加入
-        callback({ success: true, roomId }); // 回調成功訊息和房間ID
+        if (callback) callback({ success: true, roomId }); // 回調成功訊息和房間ID
         this.broadcastLobbyUpdate(); // 廣播大廳房間列表更新
     } else { // 如果房主加入失敗 (理論上不應發生)
         this.rooms.delete(roomId); // 清理創建失敗的房間
         socket.join(LOBBY_ROOM_NAME); // 讓玩家重新加入大廳
-        callback({ success: false, message: "創建房間失敗：無法將主持人加入房間。" });
+        if (callback) callback({ success: false, message: "創建房間失敗：無法將主持人加入房間。" });
     }
   }
 
@@ -106,20 +105,20 @@ export class RoomManager {
    * @param {string} data.roomId - 要加入的房間ID。
    * @param {string} [data.password] - 房間密碼。
    * @param {string} data.playerName - 加入者的玩家名稱。
-   * @param {(ack: { success: boolean; message?: string }) => void} callback - 操作完成後的回調函數。
+   * @param {(ack: { success: boolean; message?: string }) => void} [callback] - 操作完成後的回調函數 (變為可選)。
    */
   public joinRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
                   data: { roomId: string; password?: string; playerName: string },  
-                  callback: (ack: { success: boolean; message?: string }) => void): void {
+                  callback?: (ack: { success: boolean; message?: string }) => void): void { // callback 變為可選
     const room = this.rooms.get(data.roomId); // 查找房間
     if (!room) { // 如果房間不存在
-      callback({ success: false, message: '房間不存在。' });
+      if (callback) callback({ success: false, message: '房間不存在。' });
       return;
     }
     const roomSettings = room.getSettings(); // 獲取房間設定
     // 驗證密碼 (如果房間有密碼保護)
     if (roomSettings.password && roomSettings.password !== data.password) {
-        callback({ success: false, message: '房間密碼錯誤。'});
+        if (callback) callback({ success: false, message: '房間密碼錯誤。'});
         return;
     }
     
@@ -129,14 +128,14 @@ export class RoomManager {
     // 檢查房間的真人玩家名額是否已滿
     const currentHumanPlayersInRoom = room.getPlayers().filter(p => p.isHuman && p.isOnline).length;
     if (currentHumanPlayersInRoom >= roomSettings.humanPlayers) {
-        callback({ success: false, message: '房間的真人玩家名額已滿。'});
+        if (callback) callback({ success: false, message: '房間的真人玩家名額已滿。'});
         return;
     }
 
     // 檢查遊戲是否已開始 (如果不是等待階段，則無法加入)
     const gameState = room.getGameState();
     if (gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS) {
-        callback({ success: false, message: '遊戲已經開始，無法加入。'});
+        if (callback) callback({ success: false, message: '遊戲已經開始，無法加入。'});
         return;
     }
 
@@ -148,12 +147,12 @@ export class RoomManager {
     const successfullyAdded = room.addPlayer(socket, playerName, false); // isHost = false
 
     if (successfullyAdded) { // 如果成功加入
-        callback({ success: true, message: '成功請求加入房間，等待伺服器回應...'}); 
+        if (callback) callback({ success: true, message: '成功請求加入房間，等待伺服器回應...'}); 
         this.broadcastLobbyUpdate(); // 廣播大廳房間列表更新
     } else { // 如果加入失敗
         socket.join(LOBBY_ROOM_NAME); // 讓玩家重新加入大廳
         console.warn(`[RoomManager] Socket ${socket.id} 加入遊戲房間 ${data.roomId} 失敗，已重新加入 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
-        callback({ success: false, message: '無法加入房間，可能已滿員或發生錯誤。'});
+        if (callback) callback({ success: false, message: '無法加入房間，可能已滿員或發生錯誤。'});
     }
   }
 

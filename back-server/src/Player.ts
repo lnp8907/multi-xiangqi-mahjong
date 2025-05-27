@@ -27,8 +27,8 @@ export class ServerPlayer implements PlayerInterface {
   score: number;
   /** @property {boolean} isOnline - 玩家是否在線 (真人玩家)。AI 玩家在伺服器邏輯中視為永遠在線。 */
   isOnline: boolean;
-  /** @property {string | null} socketId - 真人玩家的 Socket ID。 */
-  socketId: string | null;
+  /** @property {string | undefined} socketId - 真人玩家的 Socket ID。 */ // MODIFIED HERE
+  socketId: string | undefined;
   /** @property {boolean} isHost - 是否為房主。 */
   isHost: boolean;
   /** @property {Claim[]} [pendingClaims] - 該玩家對當前棄牌可進行的宣告 (由伺服器計算)。 */
@@ -39,10 +39,8 @@ export class ServerPlayer implements PlayerInterface {
    * @param {number} id - 玩家座位索引。
    * @param {string} name - 玩家名稱。
    * @param {boolean} isHuman - 是否為真人玩家。
-   * @param {string | null} [socketId=null] - 真人玩家的 Socket ID。
-   * @param {boolean} [isHost=false] - 是否為房主。
-   */
-  constructor(id: number, name: string, isHuman: boolean, socketId: string | null = null, isHost = false) {
+   * @param {string | undefined} [socketId=undefined] - 真人玩家的 Socket ID。 */ // MODIFIED HERE
+  constructor(id: number, name: string, isHuman: boolean, socketId: string | undefined = undefined, isHost = false) { // MODIFIED HERE
     this.id = id;
     this.name = name;
     this.isHuman = isHuman;

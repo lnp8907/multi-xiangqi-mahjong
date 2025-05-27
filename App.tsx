@@ -1,5 +1,3 @@
-
-
 // 引入 React 相關的鉤子 (hooks) 和功能
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 // 引入 socket.io-client 用於客戶端與伺服器的即時通訊
@@ -565,7 +563,7 @@ const App: React.FC = () => {
                 maxPlayers: NUM_PLAYERS, // 固定玩家數
                 humanPlayers: currentGameState.configuredHumanPlayers, // 從遊戲狀態獲取配置的真人玩家數
                 fillWithAI: currentGameState.configuredFillWithAI, // 從遊戲狀態獲取是否用AI填充
-                playerName: currentGameState.hostPlayerName, // 從遊戲狀態獲取房主名稱
+                hostName: currentGameState.hostPlayerName, // 從遊戲狀態獲取房主名稱
                 numberOfRounds: currentGameState.numberOfRounds, // 從遊戲狀態獲取總局數
             }}
             initialGameState={currentGameState} // 初始遊戲狀態
