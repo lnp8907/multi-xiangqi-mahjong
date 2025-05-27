@@ -2,14 +2,14 @@
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
 import { ServerPlayer } from '../Player';
-import { Tile, TileKind, Meld, MeldDesignation, GamePhase } from '../types';
-import { INITIAL_HAND_SIZE_DEALER, TILE_KIND_DETAILS } from '../constants';
-import { sortHandVisually } from '../utils/deckManager'; // Corrected import path
+import { Tile, TileKind, Meld, MeldDesignation, GamePhase } from '../types'; // SHUNZI_DEFINITIONS was removed from here
+import { INITIAL_HAND_SIZE_DEALER, TILE_KIND_DETAILS, SHUNZI_DEFINITIONS } from '../constants'; // SHUNZI_DEFINITIONS added here, TILE_KIND_DETAILS might still be needed
+import { sortHandVisually } from '../utils/deckManager'; 
 import { removeTilesFromHand, countTilesOfKind, checkWinCondition } from '../utils/gameRules';
 import * as ClaimHandler from './claimHandler';
 import * as TurnHandler from './turnHandler';
 import * as RoundHandler from './roundHandler';
-import * as TimerManager from './timerManager'; // Import TimerManager
+import * as TimerManager from './timerManager'; 
 
 /**
  * @description 處理玩家摸牌的邏輯。
@@ -37,7 +37,7 @@ export const processDrawTile = (room: GameRoom, playerId: number): boolean => {
     room.gameState.lastDrawnTile = drawnTile;
     room.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
     room.addLog(`${player.name} (座位: ${player.id}) 摸了一張牌${player.isHuman && player.isOnline ? ` (${drawnTile.kind})` : ''}。`);
-    TimerManager.startActionTimerForPlayer(room, playerId); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, playerId); 
     if (!player.isHuman || !player.isOnline) room.broadcastGameState();
     return true;
 };
@@ -151,7 +151,7 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
     if (room.gameState.currentPlayerIndex === playerId &&
         (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN ||
          (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1 && player.hand.length + (room.gameState.lastDrawnTile ? 1:0) === INITIAL_HAND_SIZE_DEALER) ||
-         (room.gameState.gamePhase === GamePhase.PLAYER_TURN_START && player.isDealer && room.gameState.turnNumber === 1 && player.hand.length === INITIAL_HAND_SIZE_DEALER -1) // 7 for non-dealer +1 is 8
+         (room.gameState.gamePhase === GamePhase.PLAYER_TURN_START && player.isDealer && room.gameState.turnNumber === 1 && player.hand.length === INITIAL_HAND_SIZE_DEALER -1) 
         )) {
         isSelfDrawnHu = true;
         winTile = room.gameState.lastDrawnTile;
@@ -231,7 +231,7 @@ export const processDeclareHu = (room: GameRoom, playerId: number): boolean => {
             } else {
                 room.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
             }
-            TimerManager.startActionTimerForPlayer(room, playerId); // Use TimerManager
+            TimerManager.startActionTimerForPlayer(room, playerId); 
             room.broadcastGameState();
         }
         return false;
@@ -277,7 +277,7 @@ export const processClaimPeng = (room: GameRoom, playerId: number, tileToPeng: T
     room.gameState.currentPlayerIndex = player.id;
     room.gameState.gamePhase = GamePhase.AWAITING_DISCARD;
     room.updateGameStatePlayers();
-    TimerManager.startActionTimerForPlayer(room, player.id); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
     return true;
 };
@@ -320,7 +320,7 @@ export const processClaimGang = (room: GameRoom, playerId: number, tileToGang: T
     room.gameState.currentPlayerIndex = player.id;
     room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
     room.updateGameStatePlayers();
-    TimerManager.startActionTimerForPlayer(room, player.id); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
     return true;
 };
@@ -365,10 +365,51 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
     }
 
     player.hand = handCopy;
+
+    // --- MODIFICATION START: Ensure meld.tiles is in natural sequence order ---
+    const threeTilesForShunzi: Tile[] = [...removedForChi, discardedTileToChi];
+    let finalMeldTiles: Tile[] = [];
+
+    for (const shunziDef of SHUNZI_DEFINITIONS) { 
+        const kindsInDef = new Set(shunziDef);
+        const kindsInThreeTiles = new Set(threeTilesForShunzi.map(t => t.kind));
+
+        let isCurrentShunziDefMatch = true;
+        if (kindsInDef.size !== kindsInThreeTiles.size) {
+            isCurrentShunziDefMatch = false;
+        } else {
+            for (const kind of kindsInThreeTiles) {
+                if (!kindsInDef.has(kind)) {
+                    isCurrentShunziDefMatch = false;
+                    break;
+                }
+            }
+        }
+
+        if (isCurrentShunziDefMatch) {
+            // Arrange the actual three tiles according to the order in shunziDef
+            finalMeldTiles = shunziDef.map(definedKind => 
+                threeTilesForShunzi.find(actualTile => actualTile.kind === definedKind)!
+            );
+            break; 
+        }
+    }
+
+    if (finalMeldTiles.length !== 3) {
+        // Fallback: If no SHUNZI_DEFINITION matched (should not happen if getChiOptions was correct),
+        // revert to sorting hand tiles and putting discarded in middle.
+        console.error(`[PlayerActionHandler ${room.roomId}] 無法確定 ${discardedTileToChi.kind} 的順子定義。吃牌手牌: ${removedForChi.map(t=>t.kind).join(',')}. 將使用備用排序邏輯。`);
+        const sortedHandTilesFallback = [...removedForChi].sort(
+            (a, b) => TILE_KIND_DETAILS[a.kind].orderValue - TILE_KIND_DETAILS[b.kind].orderValue
+        );
+        finalMeldTiles = [sortedHandTilesFallback[0], discardedTileToChi, sortedHandTilesFallback[1]];
+    }
+    // --- MODIFICATION END ---
+    
     const chiMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
         designation: MeldDesignation.SHUNZI,
-        tiles: [...removedForChi, discardedTileToChi].sort((a,b) => TILE_KIND_DETAILS[a.kind].orderValue - TILE_KIND_DETAILS[b.kind].orderValue),
+        tiles: finalMeldTiles, 
         isOpen: true,
         claimedFromPlayerId: room.gameState.lastDiscarderIndex!,
         claimedTileId: discardedTileToChi.id,
@@ -382,7 +423,7 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
     room.gameState.currentPlayerIndex = player.id;
     room.gameState.gamePhase = GamePhase.AWAITING_DISCARD;
     room.updateGameStatePlayers();
-    TimerManager.startActionTimerForPlayer(room, player.id); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
     return true;
 };
@@ -442,7 +483,7 @@ export const processDeclareAnGang = (room: GameRoom, playerId: number, tileKindT
 
     room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
     room.updateGameStatePlayers();
-    TimerManager.startActionTimerForPlayer(room, player.id); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
     return true;
 };
@@ -482,7 +523,7 @@ export const processDeclareMingGangFromHand = (room: GameRoom, playerId: number,
 
     room.gameState.gamePhase = GamePhase.PLAYER_TURN_START;
     room.updateGameStatePlayers();
-    TimerManager.startActionTimerForPlayer(room, player.id); // Use TimerManager
+    TimerManager.startActionTimerForPlayer(room, player.id); 
     room.broadcastGameState();
     return true;
 };

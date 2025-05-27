@@ -901,7 +901,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
           {gameState.chiOptions?.map((option, index) => { // 遍歷可吃的組合
             // 完整的吃牌組合 (手上兩張 + 棄牌一張)，並排序
             const fullChiSet = [...option, gameState.lastDiscardedTile!];
-            fullChiSet.sort((a, b) => TILE_KIND_DETAILS[a.kind].orderValue - TILE_KIND_DETAILS[b.kind].orderValue); 
+            // 修改排序邏輯，按 orderValue 由大到小排列 (例如 將士象, 車馬包)
+            fullChiSet.sort((a, b) => TILE_KIND_DETAILS[b.kind].orderValue - TILE_KIND_DETAILS[a.kind].orderValue); 
             
             return (
               <div key={index} className="flex items-center justify-between p-2 bg-slate-700 rounded hover:bg-slate-600">
