@@ -39,6 +39,7 @@ interface GameBoardProps {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   /** @param {(message: string, type: NotificationType, duration?: number) => void} addNotification - 用於顯示通知的函數。 */
   addNotification: (message: string, type: NotificationType, duration?: number) => void;
+  // 移除 setShowFinalReviewModal，因為不再需要獨立的最終局回顧模態框
 }
 
 /**
@@ -65,7 +66,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     onQuitGame, 
     toggleSettingsPanel, 
     socket,
-    addNotification 
+    addNotification
 }) => {
   // --- 狀態管理 ---
   /** @description 當前的遊戲狀態，由 App.tsx 管理並透過 props傳入，此處為本地副本。 */
@@ -88,6 +89,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [availableClaimsForClient, setAvailableClaimsForClient] = useState<Claim[] | null>(null);
   /** @description 從伺服器收到的，用於「吃」牌的選項 */
   const [localChiOptionsForClient, setLocalChiOptionsForClient] = useState<Tile[][] | null>(null);
+  /** @description Ref 追蹤本回合是否已自動摸牌，防止重複觸發 */
+  const hasAutoDrawnThisTurnRef = useRef(false);
 
 
   // --- 副作用 (useEffect) ---
@@ -98,6 +101,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setActionAnnouncements([]); // 重置動作宣告動畫
     setAvailableClaimsForClient(null); // 重置可用宣告
     setLocalChiOptionsForClient(null); // 重置吃牌選項
+    hasAutoDrawnThisTurnRef.current = false; // 重置自動摸牌標記
     console.log(`[GameBoard] Initial game state updated for room ${initialGameState.roomId}, round ${initialGameState.currentRound}.`);
   }, [initialGameState.roomId, initialGameState.currentRound]); // 依賴 roomId 和 currentRound，確保房間或局數變化時重置
 
@@ -270,17 +274,33 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
 
   // --- 自動摸牌功能 ---
+  // 監聽遊戲狀態，重置自動摸牌標記
+  useEffect(() => {
+    const canAutoDrawCurrentPlayer =
+        gameState.gamePhase === GamePhase.PLAYER_TURN_START &&
+        humanPlayer &&
+        humanPlayer.isOnline &&
+        gameState.currentPlayerIndex === humanPlayer.id;
+
+    if (!canAutoDrawCurrentPlayer) {
+        hasAutoDrawnThisTurnRef.current = false;
+    }
+  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer]);
+
+  // 自動摸牌的 useEffect
   useEffect(() => {
     if (
       gameState.gamePhase === GamePhase.PLAYER_TURN_START && 
       humanPlayer && 
       humanPlayer.isOnline && 
-      gameState.currentPlayerIndex === humanPlayer.id 
+      gameState.currentPlayerIndex === humanPlayer.id &&
+      !hasAutoDrawnThisTurnRef.current // 新增檢查：確保本回合尚未自動摸牌
     ) {
       console.log(`[GameBoard] 為 ${humanPlayer.name} (座位: ${humanPlayer.id}) 自動摸牌。`);
+      hasAutoDrawnThisTurnRef.current = true; // 標記已自動摸牌
       emitPlayerAction({ type: 'DRAW_TILE' }); 
     }
-  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer, emitPlayerAction]); 
+  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer, emitPlayerAction]);
   
   /**
    * @description 處理手牌點擊事件。

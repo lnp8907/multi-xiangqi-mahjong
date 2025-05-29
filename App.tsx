@@ -159,7 +159,7 @@ const App: React.FC = () => {
       return; 
     }
 
-    console.log(`[App.tsx] 為 socket (ID: ${socket.id}) 附加事件監聽器。`);
+    // console.log(`[App.tsx] 為 socket (ID: ${socket.id}) 附加事件監聽器。`);
 
     const onConnect = () => {
       console.log('[App.tsx] Socket.IO 連接成功，ID:', socket.id);
@@ -242,7 +242,7 @@ const App: React.FC = () => {
     socket.on('lobbyError', onLobbyError);
 
     return () => {
-      console.log(`[App.tsx] 從 socket (ID: ${socket.id}) 移除事件監聽器。`);
+      // console.log(`[App.tsx] 從 socket (ID: ${socket.id}) 移除事件監聽器。`);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('connect_error', onConnectError);
@@ -302,12 +302,6 @@ const App: React.FC = () => {
       addNotification("未連接到伺服器，無法創建房間。", "error");
       return;
     }
-    // 前端房間名稱驗證 (已移至 CreateRoomModal 內部)
-    // if (settingsFromModal.roomName.trim() === '') {
-    //   addNotification("房間名稱不能為空！", "warning");
-    //   return;
-    // }
-
     setIsLoading(true); 
     setLoadingMessage("正在創建房間...");
     
@@ -339,210 +333,181 @@ const App: React.FC = () => {
       setShowPasswordModal(true); 
     } else {
       setIsLoading(true); 
-      setLoadingMessage("正在加入房間...");
-      socketRef.current.emit('lobbyJoinRoom', { roomId: roomToJoin.id, playerName: playerName }, (ack) => {
+      setLoadingMessage(`正在加入房間: ${roomToJoin.name}...`);
+      socketRef.current.emit('lobbyJoinRoom', { roomId: roomToJoin.id, playerName: playerName }, (ack) => { 
         setIsLoading(false); 
-        if (ack.success) {
-          console.log(`[App.tsx] 加入房間 ${roomToJoin.name} 請求已發送。等待伺服器回應...`);
-          addNotification(`正在加入房間 ${roomToJoin.name}...`, 'info', 2000);
-        } else {
-          addNotification(`加入房間失敗: ${ack.message || '無法加入房間'}`, 'error');
+        if (!ack.success) {
+          addNotification(`加入房間失敗: ${ack.message || '未知錯誤'}`, 'error');
         }
       });
     }
   }, [isConnected, playerName, addNotification]); 
 
-  const handlePasswordSubmit = useCallback(async (enteredPassword: string) => {
+  const handlePasswordSubmit = useCallback((password: string) => {
     if (!socketRef.current || !isConnected || !attemptingToJoinRoomDetails) {
-      addNotification("發生錯誤或未連接到伺服器。", "error");
-      setShowPasswordModal(false); 
-      setAttemptingToJoinRoomDetails(null); 
+      addNotification("無法提交密碼：連接或房間資訊遺失。", "error");
       return;
     }
     setIsLoading(true); 
-    setLoadingMessage("正在驗證密碼並加入房間...");
-    socketRef.current.emit('lobbyJoinRoom', { 
-        roomId: attemptingToJoinRoomDetails.id, 
-        password: enteredPassword, 
-        playerName: playerName 
+    setLoadingMessage(`正在使用密碼加入房間: ${attemptingToJoinRoomDetails.name}...`);
+    setShowPasswordModal(false); 
+    socketRef.current.emit('lobbyJoinRoom', {
+      roomId: attemptingToJoinRoomDetails.id,
+      password: password,
+      playerName: playerName
     }, (ack) => {
       setIsLoading(false); 
       if (ack.success) {
-        console.log(`[App.tsx] 加入加密房間 ${attemptingToJoinRoomDetails.name} 請求已發送。等待伺服器回應...`);
-        setShowPasswordModal(false);         
-        setAttemptingToJoinRoomDetails(null); 
-        addNotification("密碼正確！正在加入房間...", "success", 2000);
+        // joinedRoom 事件會處理後續
       } else {
-        addNotification(`加入房間失敗: ${ack.message || '密碼錯誤或房間無法加入'}`, 'error');
+        addNotification(`加入房間失敗: ${ack.message || '密碼錯誤或未知問題'}`, 'error');
+        setAttemptingToJoinRoomDetails(null); 
       }
     });
-  }, [isConnected, attemptingToJoinRoomDetails, playerName, addNotification]); 
-
-  const handleQuitGameLogic = useCallback(() => {
-    const previousRoomId = currentRoomId; 
-    if (socketRef.current && previousRoomId) {
-        socketRef.current.emit('gameQuitRoom', previousRoomId); 
-    }
-    setCurrentView('lobby'); 
-    setCurrentRoomId(null); 
-    setCurrentGameState(null); 
-    setClientPlayerId(null); 
-    setIsLoading(false); 
-    if (socketRef.current && socketRef.current.connected) { 
-        socketRef.current.emit('userSetName', playerName, (ack) => { 
-            if (ack.success) {
-                socketRef.current!.emit('lobbyGetRooms'); 
-            } else {
-                console.warn("[App.tsx] 退出遊戲後在伺服器設定玩家名稱失敗:", ack.message);
-                addNotification(`在伺服器更新玩家名稱時發生錯誤: ${ack.message}`, 'warning');
-            }
-        });
-    }
-  }, [currentRoomId, playerName, addNotification]); 
+  }, [isConnected, attemptingToJoinRoomDetails, playerName, addNotification]);
 
   const handleQuitGame = useCallback(() => {
-    setIsLoading(true); 
-    setLoadingMessage("正在離開房間...");
-    handleQuitGameLogic(); 
-  }, [handleQuitGameLogic]); 
-
-  const handleReturnToHome = useCallback(() => {
-    if (socketRef.current && isConnected) { 
-        socketRef.current.emit('lobbyLeave'); 
+    if (socketRef.current && currentRoomId) {
+      socketRef.current.emit('gameQuitRoom', currentRoomId); 
+      console.log(`[App.tsx] 玩家 ${playerName} 請求退出房間 ${currentRoomId}。`);
     }
-    setCurrentView('home');  
-    setCurrentRoomId(null); 
+    setCurrentRoomId(null);
     setCurrentGameState(null);
     setClientPlayerId(null);
-    setLobbyRooms([]); 
-  }, [isConnected]); 
+    setCurrentView('lobby'); 
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('userSetName', playerName, (ack) => { 
+          if (ack.success) {
+            console.log(`[App.tsx] 玩家名稱 '${playerName}' 重新設定，並重新加入 'lobby'。`);
+            socketRef.current!.emit('lobbyGetRooms'); 
+          } else {
+            console.warn(`[App.tsx] 返回大廳後設定玩家名稱失敗: ${ack.message}`);
+          }
+      });
+    }
+    addNotification("已離開遊戲房間。", "info");
+  }, [socketRef, currentRoomId, playerName, addNotification]); 
 
-  const renderLoadingOverlay = () => {
-    if (!isLoading) return null; 
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
-        <div className="text-white text-xl animate-pulse">{loadingMessage}</div>
-      </div>
-    );
+
+  // --- 渲染邏輯 ---
+  const renderView = () => {
+    switch (currentView) {
+      case 'home':
+        return <HomePage onEnterLobby={handleEnterLobby} defaultPlayerName={playerName} />;
+      case 'lobby':
+        return socket && isConnected ? (
+          <Lobby
+            onCreateRoomClick={() => setShowCreateRoomModal(true)}
+            onJoinRoomClick={handleJoinRoom}
+            onReturnToHome={() => {
+              if (socketRef.current) socketRef.current.emit('lobbyLeave');
+              setCurrentView('home');
+            }}
+            currentPlayerName={playerName}
+            lobbyRooms={lobbyRooms}
+            socket={socket}
+          />
+        ) : (
+          <div className="text-center p-8">
+            <h2 className="text-2xl text-slate-300 mb-4">正在連接到大廳...</h2>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-400 mx-auto"></div>
+            {!isConnected && <p className="text-sm text-amber-400 mt-4">提示：如果長時間無法連接，請檢查您的網路或稍後再試。</p>}
+          </div>
+        );
+      case 'game':
+        return currentGameState && socket && clientPlayerId !== null ? (
+          <GameBoard
+            roomSettings={{
+              id: currentGameState.roomId!,
+              roomName: currentGameState.roomName,
+              maxPlayers: NUM_PLAYERS,
+              humanPlayers: currentGameState.configuredHumanPlayers,
+              fillWithAI: currentGameState.configuredFillWithAI,
+              hostName: currentGameState.hostPlayerName,
+              numberOfRounds: currentGameState.numberOfRounds,
+            }}
+            initialGameState={currentGameState}
+            clientPlayerId={clientPlayerId}
+            onQuitGame={handleQuitGame}
+            toggleSettingsPanel={() => setShowSettingsPanel(prev => !prev)}
+            socket={socket}
+            addNotification={addNotification}
+            // setShowFinalReviewModal prop 已移除
+          />
+        ) : (
+          <div className="text-center p-8">
+            <h2 className="text-2xl text-slate-300 mb-4">正在載入遊戲...</h2>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-400 mx-auto"></div>
+          </div>
+        );
+      default:
+        return <HomePage onEnterLobby={handleEnterLobby} defaultPlayerName={playerName} />;
+    }
   };
 
+  // --- 主 JSX 結構 ---
   return (
-    <div className="w-full h-full bg-gradient-to-br from-slate-800 via-slate-900 to-black text-white flex flex-col items-center justify-center p-2 landscape-app relative overflow-hidden">
-      {renderLoadingOverlay()}
+    <>
+      {/* 背景音樂播放器 */}
+      <audio ref={audioRef} src="/audio/bgm_lobby_calm.mp3" loop />
       
-      {(currentView === 'home' || currentView === 'lobby') && (
-        <button
-          onClick={() => setShowSettingsPanel(true)} 
-          className="absolute top-4 right-4 z-50 p-2 bg-slate-700/70 hover:bg-slate-600 rounded-full text-white transition-colors"
-          aria-label="開啟設定"
-          title="設定" 
-        >
-          <SettingsIcon className="w-6 h-6" /> 
-        </button>
-      )}
-
-      {currentView !== 'home' && currentView !== 'game' && (
-        <header className="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-red-500 to-rose-600">
-            象棋麻將激鬥
-          </h1>
-        </header>
-      )}
-
-      <div className="w-full h-full flex items-center justify-center">
-        {currentView === 'home' && (
-          <HomePage onEnterLobby={handleEnterLobby} defaultPlayerName={playerName} />
-        )}
-
-        {currentView === 'lobby' && socket && ( 
-          <Lobby
-            onCreateRoomClick={() => setShowCreateRoomModal(true)} 
-            onJoinRoomClick={handleJoinRoom} 
-            onReturnToHome={handleReturnToHome} 
-            currentPlayerName={playerName} 
-            lobbyRooms={lobbyRooms} 
-            socket={socket} 
-          />
-        )}
-
-        {currentView === 'game' && currentRoomId && currentGameState && clientPlayerId !== null && socket && ( 
-          <GameBoard
-            roomSettings={{ 
-                id: currentRoomId,
-                roomName: currentGameState.roomName, 
-                maxPlayers: NUM_PLAYERS, 
-                humanPlayers: currentGameState.configuredHumanPlayers, 
-                fillWithAI: currentGameState.configuredFillWithAI, 
-                hostName: currentGameState.hostPlayerName, 
-                numberOfRounds: currentGameState.numberOfRounds, 
-            }}
-            initialGameState={currentGameState} 
-            clientPlayerId={clientPlayerId} 
-            onQuitGame={handleQuitGame} 
-            toggleSettingsPanel={() => setShowSettingsPanel(s => !s)} 
-            socket={socket} 
-            addNotification={addNotification} // 傳遞 addNotification
-          />
-        )}
+      {/* 應用程式主內容 */}
+      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-gray-900 text-slate-100">
+        {renderView()}
       </div>
 
+      {/* 創建房間彈出視窗 */}
       {showCreateRoomModal && (
         <CreateRoomModal
-          isOpen={showCreateRoomModal} 
-          onClose={() => setShowCreateRoomModal(false)} 
-          onCreate={handleCreateRoom} 
-          addNotification={addNotification} // 傳遞 addNotification
+          isOpen={showCreateRoomModal}
+          onClose={() => setShowCreateRoomModal(false)}
+          onCreate={handleCreateRoom}
+          addNotification={addNotification}
         />
       )}
-
+      {/* 輸入密碼彈出視窗 */}
       {showPasswordModal && attemptingToJoinRoomDetails && (
         <PasswordInputModal
-          isOpen={showPasswordModal} 
-          onClose={() => { 
-            setShowPasswordModal(false);
-            setAttemptingToJoinRoomDetails(null);
-          }}
-          onSubmit={handlePasswordSubmit} 
-          roomName={attemptingToJoinRoomDetails.name} 
+          isOpen={showPasswordModal}
+          onClose={() => { setShowPasswordModal(false); setAttemptingToJoinRoomDetails(null); }}
+          onSubmit={handlePasswordSubmit}
+          roomName={attemptingToJoinRoomDetails.name}
         />
       )}
-      
+      {/* 設定面板 */}
       <SettingsPanel
-        isOpen={showSettingsPanel} 
-        onClose={() => setShowSettingsPanel(false)} 
-        isMusicPlaying={isMusicPlaying} 
-        onToggleMusicPlay={toggleMusicPlay} 
-        musicVolume={musicVolume} 
-        onVolumeChange={handleVolumeChange} 
-        isSoundEffectsEnabled={isSoundEffectsEnabled} 
-        onToggleSoundEffectsEnabled={toggleSoundEffectsEnabled} 
-        soundEffectsVolume={soundEffectsVolume} 
-        onSoundEffectsVolumeChange={handleSoundEffectsVolumeChange} 
+        isOpen={showSettingsPanel}
+        onClose={() => setShowSettingsPanel(false)}
+        isMusicPlaying={isMusicPlaying}
+        onToggleMusicPlay={toggleMusicPlay}
+        musicVolume={musicVolume}
+        onVolumeChange={handleVolumeChange}
+        isSoundEffectsEnabled={isSoundEffectsEnabled}
+        onToggleSoundEffectsEnabled={toggleSoundEffectsEnabled}
+        soundEffectsVolume={soundEffectsVolume}
+        onSoundEffectsVolumeChange={handleSoundEffectsVolumeChange}
       />
-      
-      <audio ref={audioRef} src="/audio/chinese-traditional-relaxed.mp3" loop preload="auto"></audio>
-
-      {/* 通知容器，固定在畫面右上角 */}
-      <div className="fixed top-4 right-4 z-[200] w-full max-w-sm space-y-2">
-        {notifications.map((notification) => (
+      {/* 載入中遮罩 */}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-[100]">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-sky-400 mb-4"></div>
+          <p className="text-lg text-slate-200">{loadingMessage}</p>
+        </div>
+      )}
+      {/* 通知列表容器 */}
+      <div className="fixed top-4 right-4 z-[90] w-full max-w-sm space-y-2">
+        {notifications.map((n) => (
           <NotificationToast
-            key={notification.id}
-            id={notification.id}
-            message={notification.message}
-            type={notification.type}
-            duration={notification.duration}
-            onDismiss={removeNotification} // 傳遞移除通知的函數
+            key={n.id}
+            id={n.id}
+            message={n.message}
+            type={n.type}
+            duration={n.duration}
+            onDismiss={removeNotification}
           />
         ))}
       </div>
-
-      {currentView !== 'game' && (
-         <footer className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 text-xs text-slate-400 text-center w-full px-4">
-          <p>技巧與運氣的遊戲。請適度娛樂。</p>
-           {!isConnected && currentView !== 'home' && <p className="text-red-400 animate-pulse">與伺服器斷線或連接中...</p>}
-        </footer>
-      )}
-    </div>
+    </>
   );
 };
 

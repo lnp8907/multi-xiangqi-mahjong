@@ -4,6 +4,8 @@
 // 特別是那些可能使用 console 的程式碼。
 import './logger';
 
+// ✅ 加入 express
+import express from 'express'; 
 // 引入 Node.js http 模組用於創建 HTTP 伺服器
 import { createServer } from 'http';
 // 引入 Socket.IO Server 類別及相關類型
@@ -15,9 +17,17 @@ import { ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketDa
 // 引入常數
 import { SERVER_PORT, MAX_PLAYER_NAME_LENGTH, SYSTEM_SENDER_NAME, DEFAULT_PLAYER_NAME, LOBBY_ROOM_NAME, DEFAULT_HOST_NAME } from './constants';
 
-// 創建 HTTP 伺服器實例
-const httpServer = createServer();
-// 創建 Socket.IO 伺服器實例，並配置 CORS (跨來源資源共享)
+import path from 'path';
+
+// ✅ 新增 Express 應用
+const app = express();
+
+app.use(express.static(path.join(__dirname, '../../dist/')));
+
+app.all('/', (req, res, next) => {res.sendFile(path.join(__dirname, '../../dist/index.html'))})
+
+// ✅ 包裝 HTTP server
+const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
   cors: {
     origin: "*", // 允許所有來源的連接 (在生產環境中應配置為特定來源)

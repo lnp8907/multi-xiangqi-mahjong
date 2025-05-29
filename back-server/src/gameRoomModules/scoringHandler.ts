@@ -15,7 +15,7 @@ export const calculateAndApplyScores = (room: GameRoom): void => {
 
             // 自摸得分加倍 (可調整規則)
             if (room.gameState.winType === 'selfDrawn') {
-                baseScore *= 2;
+                baseScore *= 6;
             }
             
             // TODO: 根據番種、牌型等計算額外分數
@@ -37,7 +37,8 @@ export const calculateAndApplyScores = (room: GameRoom): void => {
             } 
             // 如果是自摸，則其他三家各扣除一定分數 (例如：baseScore / 3 或固定值)
             else if (room.gameState.winType === 'selfDrawn') {
-                const scoreToDeduct = Math.ceil(baseScore / (room.players.length -1)); // 平均分配給其他玩家
+                // const scoreToDeduct = Math.ceil(baseScore / (room.players.length -1)); // 平均分配給其他玩家
+                const scoreToDeduct = Math.ceil(baseScore)
                 room.players.forEach(player => {
                     if (player.id !== winner.id) {
                         player.score -= scoreToDeduct;

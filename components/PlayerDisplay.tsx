@@ -125,8 +125,11 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
    * @returns {JSX.Element} 渲染的內容。
    */
   const renderContent = () => {
-    // 是否顯示真實手牌：主視角玩家，或者遊戲/本局結束時
-    const showRealHand = isHumanPlayerView || gamePhase === GamePhase.GAME_OVER || gamePhase === GamePhase.ROUND_OVER;
+    // 是否顯示真實手牌：主視角玩家，或者遊戲/本局結束時，或者在等待再戰投票時
+    const showRealHand = isHumanPlayerView || 
+                         gamePhase === GamePhase.GAME_OVER || 
+                         gamePhase === GamePhase.ROUND_OVER ||
+                         gamePhase === GamePhase.AWAITING_REMATCH_VOTES;
     // 要顯示的手牌陣列：若是顯示真實手牌，則用排序後的手牌；否則用佔位符代表牌背
     const handToDisplay = showRealHand ? sortedHand : Array.from({ length: player.hand?.length || 0 }).map((_, idx) => `hidden-${player.id}-${idx}`);
     
@@ -142,10 +145,10 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
             <TileDisplay
               key={key}
               tile={tile}
-              // 點擊事件：僅對主視角、真人玩家、非遊戲結束/本局結束階段、底部位置的牌有效
-              onClick={showRealHand && isHumanPlayerView && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && position === 'bottom' ? onTileClick : undefined}
+              // 點擊事件：僅對主視角、真人玩家、非遊戲結束/本局結束/等待再戰階段、底部位置的牌有效
+              onClick={showRealHand && isHumanPlayerView && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom' ? onTileClick : undefined}
               // 是否選中：同上條件，且牌ID與選中ID相符
-              isSelected={showRealHand && isHumanPlayerView && tile?.id === selectedTileId && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && position === 'bottom'}
+              isSelected={showRealHand && isHumanPlayerView && tile?.id === selectedTileId && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom'}
               size="medium" // 手牌大小
               isHidden={!showRealHand} // 是否顯示為牌背
               characterOrientation={tileCharOrientation} // 牌面文字方向
