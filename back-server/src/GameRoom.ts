@@ -114,7 +114,7 @@ export class GameRoom {
       winningTileDiscarderId: null,
       winType: null,
       winningDiscardedTile: null,
-      winAnnouncementText: null, // 初始化新增的欄位
+    //   winAnnouncementText: null, // 初始化新增的欄位
       isDrawGame: false,
       chiOptions: null,
       playerMakingClaimDecision: null,
