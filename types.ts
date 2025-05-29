@@ -1,3 +1,4 @@
+
 // 定義牌的顏色 (黑、紅)
 export enum Suit {
   BLACK = 'Black', // 黑色
@@ -71,6 +72,8 @@ export interface Player {
   socketId?: string; // 多人遊戲中，玩家的 socket ID (僅對真人玩家有意義)
   isHost?: boolean; // 是否為房主 (由伺服器設定並同步到客戶端)
   hasRespondedToClaim?: boolean; // 標記玩家是否已對當前回合的宣告做出回應
+  isSpeaking?: boolean; // 新增：玩家是否正在說話
+  isMuted?: boolean;    // 新增：玩家是否已靜音 (此狀態由 App.tsx 管理並更新到 GameState)
 }
 
 
@@ -161,7 +164,7 @@ export interface GameState {
   turnNumber: number;            // 當前回合數 (指遊戲內的總摸打回合，非局數)
   messageLog: string[];          // 遊戲訊息記錄 (例如：誰摸了什麼牌、誰宣告了什麼)
   potentialClaims: Claim[];      // 系統記錄的，所有對上一張棄牌可能的宣告 (用於判斷優先序)
-  
+
   winnerId: number | null;       // 若有贏家，其ID (玩家索引)
   winningTileDiscarderId: number | null; // 若為食胡，放槍的玩家ID (玩家索引)
   winType: 'selfDrawn' | 'discard' | null; // 胡牌類型：自摸或食胡
@@ -181,7 +184,7 @@ export interface GameState {
   matchOver: boolean;            // 是否所有局數已完成 (整場比賽結束)
   nextRoundCountdown: number | null; // 下一局開始倒數計時 (秒)
   humanPlayersReadyForNextRound: number[]; // 已確認下一局的真人玩家ID列表 (座位索引)
-  
+
   // 多人遊戲特定狀態 (從 RoomSettings 同步或初始化)
   configuredHumanPlayers: number; // 房間創建時設定的真人玩家數量
   configuredFillWithAI: boolean; // 房間創建時設定的 AI 填充選項
@@ -308,6 +311,15 @@ export interface RoomListData {
   hostName?: string; // (可選) 房主名稱
 }
 
+// --- 語音聊天相關類型 ---
+export interface VoiceChatUser {
+  socketId: string;
+  playerId: number; // 玩家在遊戲中的座位 ID
+  playerName: string;
+  isMuted: boolean;
+  isSpeaking?: boolean; // 前端也追蹤發言狀態
+}
+
 // --- Socket.IO 事件類型定義 ---
 
 /**
@@ -323,67 +335,27 @@ export interface ServerToClientEvents {
   disconnect: (reason: string, description?: any) => void;
 
   // --- 大廳事件 ---
-  /** @description 伺服器發送大廳房間列表
-   * @param {RoomListData[]} rooms - 房間列表數據
-   */
   lobbyRoomList: (rooms: RoomListData[]) => void;
-  /** @description 伺服器廣播大廳聊天訊息
-   * @param {ChatMessage} message - 聊天訊息對象
-   */
   lobbyChatMessage: (message: ChatMessage) => void;
-  /** @description 伺服器發送大廳相關錯誤訊息 (例如：創建房間失敗)
-   * @param {string} message - 錯誤訊息
-   */
   lobbyError: (message: string) => void;
 
   // --- 遊戲事件 ---
-  /** @description 客戶端成功加入房間後，伺服器發送此事件
-   * @param {object} data - 包含遊戲狀態、房間ID和客戶端玩家ID的數據
-   * @param {GameState} data.gameState - 初始遊戲狀態
-   * @param {string} data.roomId - 加入的房間ID
-   * @param {number} data.clientPlayerId - 客戶端在此房間中的玩家ID (座位索引)
-   */
   joinedRoom: (data: { gameState: GameState; roomId: string; clientPlayerId: number }) => void;
-  /** @description 伺服器發送遊戲狀態更新 (可以是完整或部分狀態)
-   * @param {GameState} gameState - 最新的遊戲狀態
-   */
   gameStateUpdate: (gameState: GameState) => void;
-  /** @description 有新玩家加入遊戲房間 (此事件目前被 gameStateUpdate 中的 players 陣列更新所隱含，可能移除)
-   * @param {Player} player - 新加入的玩家資訊
-   */
   gamePlayerJoined: (player: Player) => void;
-  /** @description 有玩家離開遊戲房間 (例如斷線)
-   * @param {object} data - 包含離開玩家的資訊
-   * @param {number} data.playerId - 離開的玩家ID (座位索引)
-   * @param {number} [data.newHostId] - 如果房主離開，新的房主ID (座位索引)
-   * @param {string} [data.message] - 相關訊息，例如離開原因
-   */
   gamePlayerLeft: (data: { playerId: number; newHostId?: number; message?: string }) => void;
-  /** @description 伺服器廣播遊戲內聊天訊息
-   * @param {ChatMessage} message - 聊天訊息對象
-   */
   gameChatMessage: (message: ChatMessage) => void;
-  /** @description 伺服器發送遊戲相關錯誤訊息 (例如：無效操作)
-   * @param {string} message - 錯誤訊息
-   */
   gameError: (message: string) => void;
-  /** @description 伺服器廣播玩家動作宣告的視覺特效 (例如：碰、槓、胡)
-   * @param {object} data - 宣告特效的相關資訊
-   * @param {string} data.text - 宣告的文字 (例如："碰")
-   * @param {number} data.playerId - 執行動作的玩家ID (座位索引)
-   * @param {'top' | 'bottom' | 'left' | 'right'} data.position - 伺服器視角的玩家位置 (客戶端會轉換成相對位置)
-   * @param {number} data.id - 宣告的唯一ID (用於客戶端動畫管理)
-   * @param {boolean} [data.isMultiHuTarget] - 是否為「一炮多響」的目標之一
-   */
   actionAnnouncement: (data: { text: string; playerId: number; position: 'top' | 'bottom' | 'left' | 'right', id: number, isMultiHuTarget?: boolean }) => void;
-  // ROUND_OVER 和 GAME_OVER 事件現在已整合到 gameStateUpdate.gamePhase 的變化中
-
-  /** @description 伺服器通知客戶端其可以進行的宣告選項 (在同時詢問模型中)
-   * @param {object} data - 包含可用宣告和吃牌選項的數據
-   * @param {Claim[]} data.claims - 客戶端可用的宣告列表
-   * @param {Tile[][]} [data.chiOptions] - 如果可以吃，則包含可吃的組合
-   */
   availableClaimsNotification: (data: { claims: Claim[], chiOptions?: Tile[][] }) => void;
+
+  // --- 語音聊天事件 (伺服器到客戶端) ---
+  voiceSignal: (data: { fromSocketId: string; signal: any }) => void; // WebRTC 信令
+  voiceChatUserList: (data: { users: VoiceChatUser[] }) => void; // 房間內現有的語音使用者列表
+  voiceChatUserJoined: (userData: VoiceChatUser) => void; // 新使用者加入語音
+  voiceChatUserLeft: (data: { socketId: string }) => void; // 使用者離開語音
+  voiceChatUserMuted: (data: { socketId: string; muted: boolean }) => void; // 使用者靜音狀態更新
+  voiceChatUserSpeaking: (data: { socketId: string; speaking: boolean }) => void; // 使用者發言狀態更新
 }
 
 /**
@@ -391,56 +363,26 @@ export interface ServerToClientEvents {
  */
 export interface ClientToServerEvents {
   // --- 使用者管理 ---
-  /** @description 客戶端設定其玩家名稱
-   * @param {string} name - 玩家設定的名稱
-   * @param {(ack: {success: boolean, message?: string}) => void} [callback] - 伺服器回調，告知是否成功
-   */
   userSetName: (name: string, callback?: (ack: {success: boolean, message?: string}) => void) => void;
 
   // --- 大廳事件 ---
-  /** @description 客戶端請求創建一個新房間
-   * @param {Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }} settings - 房間設定 (不含 maxPlayers) 及創建者名稱
-   * @param {(ack: {success: boolean, roomId?: string, message?: string}) => void} [callback] - 伺服器回調，告知是否成功及房間ID
-   */
   lobbyCreateRoom: (settings: Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }, callback?: (ack: {success: boolean, roomId?: string, message?: string}) => void) => void;
-  /** @description 客戶端請求加入一個已存在的房間
-   * @param {object} data - 加入房間所需的資料
-   * @param {string} data.roomId - 要加入的房間ID
-   * @param {string} [data.password] - 房間密碼 (如果需要)
-   * @param {string} data.playerName - 加入者的玩家名稱
-   * @param {(ack: {success: boolean, message?: string}) => void} [callback] - 伺服器回調，告知是否成功
-   */
   lobbyJoinRoom: (data: { roomId: string; password?: string; playerName: string }, callback?: (ack: {success: boolean, message?: string}) => void) => void;
-  /** @description 客戶端請求獲取大廳中的房間列表 */
   lobbyGetRooms: () => void;
-  /** @description 客戶端發送大廳聊天訊息
-   * @param {string} messageText - 聊天訊息內容
-   */
   lobbySendChatMessage: (messageText: string) => void;
-  /** @description 客戶端通知伺服器其已離開大廳視圖 (例如返回主頁) */
   lobbyLeave: () => void;
 
   // --- 遊戲事件 ---
-  /** @description 客戶端發送遊戲中的玩家動作
-   * @param {string} roomId - 動作發生的房間ID
-   * @param {GameActionPayload} action - 玩家執行的動作及其負載
-   */
   gamePlayerAction: (roomId: string, action: GameActionPayload) => void;
-  /** @description 客戶端發送遊戲內的聊天訊息
-   * @param {string} roomId - 訊息發送的房間ID
-   * @param {string} messageText - 聊天訊息內容
-   */
   gameSendChatMessage: (roomId: string, messageText: string) => void;
-  // gameConfirmNextRound 事件已整合到 gamePlayerAction: {type: 'PLAYER_CONFIRM_NEXT_ROUND', playerId}
-  /** @description 房主請求開始遊戲
-   * @param {string} roomId - 要開始遊戲的房間ID
-   */
   gameRequestStart: (roomId: string) => void;
-  /** @description 玩家請求退出當前所在的遊戲房間 (無論是等待中或遊戲中)
-   * @param {string} roomId - 要退出的房間ID
-   */
   gameQuitRoom: (roomId: string) => void;
-  // gameRequestRematch 已被新的 PLAYER_VOTE_REMATCH 取代
+
+  // --- 語音聊天事件 (客戶端到伺服器) ---
+  voiceSignal: (data: { toSocketId: string; signal: any }) => void; // WebRTC 信令
+  voiceChatJoinRoom: (data: { roomId: string }) => void; // 客戶端請求加入語音聊天
+  voiceChatToggleMute: (data: { muted: boolean }) => void; // 客戶端更新自己的靜音狀態
+  voiceChatSpeakingUpdate: (data: { speaking: boolean }) => void; // 客戶端更新自己的發言狀態
 }
 
 
@@ -470,3 +412,7 @@ export type MockRoomData = RoomListData & { password?: string };
  * @description 定義通知的可能類型 (匯出以供其他檔案使用)
  */
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
+
+// WebRTC Peer Connection Map Type
+export type PeerConnectionsMap = Record<string, RTCPeerConnection>;
+export type RemoteStreamsMap = Record<string, MediaStream>;

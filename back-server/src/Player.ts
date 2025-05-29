@@ -27,7 +27,7 @@ export class ServerPlayer implements PlayerInterface {
   score: number;
   /** @property {boolean} isOnline - 玩家是否在線 (真人玩家)。AI 玩家在伺服器邏輯中視為永遠在線。 */
   isOnline: boolean;
-  /** @property {string | undefined} socketId - 真人玩家的 Socket ID。 */ // MODIFIED HERE
+  /** @property {string | undefined} socketId - 真人玩家的 Socket ID。 */
   socketId: string | undefined;
   /** @property {boolean} isHost - 是否為房主。 */
   isHost: boolean;
@@ -35,14 +35,18 @@ export class ServerPlayer implements PlayerInterface {
   pendingClaims?: Claim[]; 
   /** @property {boolean} [hasRespondedToClaim] - 標記玩家是否已對當前回合的宣告做出回應。 */
   hasRespondedToClaim?: boolean;
+  /** @property {boolean} [isSpeaking] - 玩家是否正在說話 (語音聊天)。 */
+  isSpeaking?: boolean;
+  /** @property {boolean} [isMuted] - 玩家是否已靜音 (語音聊天)。 */
+  isMuted?: boolean;
 
   /**
    * @constructor
    * @param {number} id - 玩家座位索引。
    * @param {string} name - 玩家名稱。
    * @param {boolean} isHuman - 是否為真人玩家。
-   * @param {string | undefined} [socketId=undefined] - 真人玩家的 Socket ID。 */ // MODIFIED HERE
-  constructor(id: number, name: string, isHuman: boolean, socketId: string | undefined = undefined, isHost = false) { // MODIFIED HERE
+   * @param {string | undefined} [socketId=undefined] - 真人玩家的 Socket ID。 */
+  constructor(id: number, name: string, isHuman: boolean, socketId: string | undefined = undefined, isHost = false) {
     this.id = id;
     this.name = name;
     this.isHuman = isHuman;
@@ -55,6 +59,8 @@ export class ServerPlayer implements PlayerInterface {
     this.isHost = isHost;
     this.pendingClaims = []; // 初始化空宣告列表
     this.hasRespondedToClaim = false; // 初始化回應狀態
+    this.isSpeaking = undefined; // 初始化語音狀態
+    this.isMuted = undefined;    // 初始化語音狀態
   }
 
   /**

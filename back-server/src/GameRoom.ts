@@ -1,9 +1,11 @@
+
 // 引入 Socket.IO 相關類型
 import { Server, Socket } from 'socket.io';
 // 引入遊戲相關類型定義
 import {
     GameState, Player, Tile, Meld, RoomSettings, GamePhase, TileKind, Claim, GameActionPayload, MeldDesignation, ChatMessage,
-    ServerToClientEvents, ClientToServerEvents, InterServerEvents, SocketData, AIExecutableAction, Suit, RematchVote, SubmittedClaim
+    ServerToClientEvents, ClientToServerEvents, InterServerEvents, SocketData, AIExecutableAction, Suit, RematchVote, SubmittedClaim,
+    VoiceChatUser // 新增 VoiceChatUser
 } from './types';
 // 引入遊戲常數
 import {
@@ -36,7 +38,7 @@ import * as TurnHandler from './gameRoomModules/turnHandler';
 import * as RoundHandler from './gameRoomModules/roundHandler';
 import * as MatchHandler from './gameRoomModules/matchHandler';
 import * as AIHandler from './gameRoomModules/aiHandler';
-import * as TimerManager from './gameRoomModules/timerManager'; // 標準導入 TimerManager
+import * as TimerManager from './gameRoomModules/timerManager';
 
 
 /**
@@ -53,13 +55,16 @@ export class GameRoom {
   private onRoomEmptyCallback: () => void;
 
   public emptyRoomTimerId: NodeJS.Timeout | null = null;
-  public actionTimerId: NodeJS.Timeout | null = null; // 也可以是 setInterval 的 ID
-  public nextRoundTimerId: NodeJS.Timeout | null = null; // 也可以是 setInterval 的 ID
-  public rematchTimerId: NodeJS.Timeout | null = null; // 也可以是 setInterval 的 ID
+  public actionTimerId: NodeJS.Timeout | null = null;
+  public nextRoundTimerId: NodeJS.Timeout | null = null;
+  public rematchTimerId: NodeJS.Timeout | null = null;
   public aiActionTimeoutId: NodeJS.Timeout | null = null;
   public roundTimeoutTimerId: NodeJS.Timeout | null = null;
 
   public actionSubmitLock: Set<number> = new Set();
+
+  // 新增：語音聊天參與者列表
+  private voiceParticipants: Map<string, VoiceChatUser> = new Map();
 
 
   /**
@@ -114,7 +119,6 @@ export class GameRoom {
       winningTileDiscarderId: null,
       winType: null,
       winningDiscardedTile: null,
-    //   winAnnouncementText: null, // 初始化新增的欄位
       isDrawGame: false,
       chiOptions: null,
       playerMakingClaimDecision: null,
@@ -130,7 +134,6 @@ export class GameRoom {
       hostPlayerName: this.roomSettings.hostName,
       rematchVotes: [],
       rematchCountdown: null,
-      // 新增欄位初始化
       submittedClaims: [],
       globalClaimTimerActive: false,
     };
@@ -169,46 +172,38 @@ export class GameRoom {
   }
 
 
-  /**
-   * @description 對 this.players 列表按玩家ID (座位索引) 進行升序排序。
-   */
   public sortPlayersById(): void {
     this.players.sort((a, b) => a.id - b.id);
   }
 
-  /**
-   * @description 更新 this.gameState.players 陣列，使其與 this.players (權威來源) 同步。
-   *              伺服器應總是發送真實手牌數據。客戶端的 PlayerDisplay 組件將負責根據
-   *              遊戲階段和是否為當前玩家視角來決定顯示真實牌面或牌背。
-   */
   public updateGameStatePlayers(): void {
-    this.sortPlayersById(); // 確保玩家順序正確
-    this.gameState.players = this.players.map(serverPlayerInstance => ({
-        id: serverPlayerInstance.id,
-        name: serverPlayerInstance.name,
-        isHuman: serverPlayerInstance.isHuman,
-        // 總是發送真實手牌數據；客戶端 PlayerDisplay 會處理顯示邏輯 (牌背/牌面)
-        hand: [...serverPlayerInstance.hand], 
-        melds: serverPlayerInstance.melds.map(meld => ({...meld, tiles: [...meld.tiles]})), // 深拷貝面子
-        isDealer: serverPlayerInstance.isDealer,
-        score: serverPlayerInstance.score,
-        isOnline: serverPlayerInstance.isOnline,
-        socketId: serverPlayerInstance.socketId === null ? undefined : serverPlayerInstance.socketId, // 確保 null 轉換為 undefined
-        pendingClaims: serverPlayerInstance.pendingClaims ? [...serverPlayerInstance.pendingClaims] : [], // 深拷貝宣告
-        isHost: serverPlayerInstance.isHost,
-        hasRespondedToClaim: serverPlayerInstance.hasRespondedToClaim,
-    }));
+    this.sortPlayersById();
+    this.gameState.players = this.players.map(serverPlayerInstance => {
+        const voiceInfo = this.voiceParticipants.get(serverPlayerInstance.socketId || '');
+        return {
+            id: serverPlayerInstance.id,
+            name: serverPlayerInstance.name,
+            isHuman: serverPlayerInstance.isHuman,
+            hand: [...serverPlayerInstance.hand],
+            melds: serverPlayerInstance.melds.map(meld => ({...meld, tiles: [...meld.tiles]})),
+            isDealer: serverPlayerInstance.isDealer,
+            score: serverPlayerInstance.score,
+            isOnline: serverPlayerInstance.isOnline,
+            socketId: serverPlayerInstance.socketId === null ? undefined : serverPlayerInstance.socketId,
+            pendingClaims: serverPlayerInstance.pendingClaims ? [...serverPlayerInstance.pendingClaims] : [],
+            isHost: serverPlayerInstance.isHost,
+            hasRespondedToClaim: serverPlayerInstance.hasRespondedToClaim,
+            isSpeaking: voiceInfo?.isSpeaking || false, // 從 voiceParticipants 獲取
+            isMuted: voiceInfo?.isMuted || false,     // 從 voiceParticipants 獲取
+        };
+    });
   }
 
 
-  /** @description 獲取當前房間的設定。 */
   public getSettings(): RoomSettings {
     return this.roomSettings;
   }
 
-  /**
-   * @description 獲取當前完整的遊戲狀態 (深拷貝)。
-   */
   public getGameState(): GameState {
     this.updateGameStatePlayers();
     const currentFullGameState = {
@@ -222,30 +217,22 @@ export class GameRoom {
     return currentFullGameState;
   }
 
-  /** @description 獲取房間內玩家列表 (唯讀)。 */
   public getPlayers(): ReadonlyArray<ServerPlayer> {
     return this.players;
   }
 
-  /** @description 檢查房間的真人玩家名額是否已滿。 */
   public isFull(): boolean {
     return this.players.filter(p => p.isHuman && p.isOnline).length >= this.roomSettings.humanPlayers;
   }
 
-   /** @description 檢查房間內是否沒有在線的真人玩家。 */
   public isEmpty(): boolean {
     return this.players.filter(p => p.isHuman && p.isOnline).length === 0;
   }
 
-  /** @description 檢查指定 socketId 的玩家是否在房間內。 */
   public hasPlayer(socketId: string): boolean {
     return this.players.some(p => p.socketId === socketId);
   }
 
-  /**
-   * @description 向遊戲訊息記錄中添加一條帶時間戳的訊息。
-   * @param {string} message - 要記錄的訊息內容。
-   */
   public addLog(message: string): void {
     const timedMessage = `${new Date().toLocaleTimeString('zh-TW', { hour12: false})} - ${message}`;
     this.gameState.messageLog.unshift(timedMessage);
@@ -254,10 +241,6 @@ export class GameRoom {
     }
   }
 
-  /**
-   * @description 重置空房間計時器。如果房間內已無真人玩家，則啟動計時器；否則清除計時器。
-   * @param {boolean} [isGameEnded=false] - 遊戲是否已結束 (影響計時器時長)。
-   */
   public resetEmptyRoomTimer(isGameEnded = false): void {
     if (this.emptyRoomTimerId) {
       clearTimeout(this.emptyRoomTimerId);
@@ -274,13 +257,6 @@ export class GameRoom {
     }
   }
 
-/**
- * @description 將一個新玩家加入到遊戲房間，或處理重連玩家。
- * @param {Socket} socket - 玩家的 Socket 連接實例。
- * @param {string} playerName - 玩家的名稱。
- * @param {boolean} isHost - 該玩家是否為房主。
- * @returns {boolean} 如果成功加入或重連，返回 true；否則返回 false。
- */
 public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>, playerName: string, isHost: boolean): boolean {
     console.info(`[GameRoom ${this.roomId}] addPlayer: 嘗試加入玩家 ${playerName} (房主: ${isHost})。目前房間內玩家數: ${this.players.length}`);
 
@@ -296,6 +272,9 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         console.info(`[GameRoom ${this.roomId}] 玩家 ${playerName} (ID: ${existingPlayerBySocketId.id}) 重新連接成功。`);
         this.broadcastGameState();
         this.resetEmptyRoomTimer();
+
+        // 重連時也加入語音聊天
+        this.handleVoiceChatJoin(socket);
         return true;
     }
 
@@ -312,7 +291,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         assignedSeatIndex = offlineHumanPlayerByName.id;
         offlineHumanPlayerByName.socketId = socket.id;
         offlineHumanPlayerByName.isOnline = true;
-        offlineHumanPlayerByName.isHost = isHost;
+        offlineHumanPlayerByName.isHost = isHost; // 房主狀態也可能需要更新
         this.addLog(`${offlineHumanPlayerByName.name} (座位: ${assignedSeatIndex}) 的席位已恢復。`);
         console.info(`[GameRoom ${this.roomId}] 玩家 ${playerName} (ID: ${assignedSeatIndex}) 已恢復離線座位。`);
     } else {
@@ -344,7 +323,8 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
 
     const finalPlayerObject = this.players.find(p => p.id === assignedSeatIndex)!;
     socket.data.currentRoomId = this.roomId;
-    socket.data.playerId = finalPlayerObject.id;
+    socket.data.playerId = finalPlayerObject.id; // 確保 socket.data.playerId 被設定
+    socket.data.isMutedInVoiceChat = false; // 初始化語音靜音狀態
     socket.join(this.roomId);
 
     if (this.gameState.gamePhase === GamePhase.LOADING || this.gameState.gamePhase === GamePhase.WAITING_FOR_PLAYERS) {
@@ -356,24 +336,28 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     this.broadcastGameState();
     this.resetEmptyRoomTimer();
 
-    console.info(`[GameRoom ${this.roomId}] 玩家 ${playerName} (ID: ${finalPlayerObject.id}) 加入流程完成。房間內物件總數: ${this.players.length}。在線真人數: ${this.players.filter(p=>p.isHuman && p.isOnline).length}。`);
+    // 新玩家加入房間後，處理語音聊天加入
+    this.handleVoiceChatJoin(socket);
+
+    console.info(`[GameRoom ${this.roomId}] 玩家 ${playerName} (ID: ${finalPlayerObject.id}) 加入流程完成。房間内物件總數: ${this.players.length}。在線真人數: ${this.players.filter(p=>p.isHuman && p.isOnline).length}。`);
     return true;
   }
 
-  /**
-   * @description 從房間移除一個玩家 (通常因斷線或主動退出)。
-   * @param {string} socketId - 要移除的玩家的 Socket ID。
-   * @param {boolean} [isGracefulQuit=false] - 玩家是否為主動退出。
-   */
   public removePlayer(socketId: string, isGracefulQuit: boolean = false): void {
     const playerIndexInArray = this.players.findIndex(p => p.socketId === socketId);
-    if (playerIndexInArray === -1) {
-        console.warn(`[GameRoom ${this.roomId}] 嘗試移除玩家 (Socket: ${socketId})，但未找到。`);
+
+
+    const removedPlayer = playerIndexInArray !== -1 ? this.players[playerIndexInArray] : null;
+    console.info(`[GameRoom ${this.roomId}] 玩家 ${removedPlayer?.name || '未知'} (Socket: ${socketId}) 正在被移除。主動退出: ${isGracefulQuit}。遊戲階段: ${this.gameState.gamePhase}`);
+
+    // 處理語音聊天離開
+    this.handleVoiceChatLeave(socketId); // 無論玩家是否在 this.players 中找到，都嘗試從語音中移除
+
+    if (!removedPlayer) {
+        console.warn(`[GameRoom ${this.roomId}] 嘗試移除玩家 (Socket: ${socketId})，但未在核心玩家列表中找到。`);
         return;
     }
 
-    const removedPlayer = this.players[playerIndexInArray];
-    console.info(`[GameRoom ${this.roomId}] 玩家 ${removedPlayer.name} (ID: ${removedPlayer.id}, Socket: ${socketId}) 正在被移除。主動退出: ${isGracefulQuit}。遊戲階段: ${this.gameState.gamePhase}`);
 
     const wasPlayingMidGame = ![
         GamePhase.WAITING_FOR_PLAYERS,
@@ -387,10 +371,9 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
 
     if (wasPlayingMidGame && removedPlayer.isHuman) {
         removedPlayer.isOnline = false;
-        this.addLog(logMessage); // 使用判斷後的日誌訊息
+        this.addLog(logMessage);
         this.io.to(this.roomId).emit('gamePlayerLeft', { playerId: removedPlayer.id, message: logMessage });
 
-        // 如果是輪到該離線玩家行動 (包括回合行動或宣告行動)
         const isCurrentTurnPlayer = this.gameState.currentPlayerIndex === removedPlayer.id &&
                                     (this.gameState.gamePhase === GamePhase.PLAYER_TURN_START ||
                                      this.gameState.gamePhase === GamePhase.PLAYER_DRAWN ||
@@ -402,9 +385,9 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
 
 
         if (isCurrentTurnPlayer || isCurrentClaimDecisionPlayer) {
-            TimerManager.clearActionTimer(this); // 清除可能存在的單人回合計時器
+            TimerManager.clearActionTimer(this);
             this.addLog(`${removedPlayer.name} 的回合/宣告，因${isGracefulQuit ? '退出' : '斷線'}而自動處理。`);
-            AIHandler.processAITurnIfNeeded(this); // 讓 AI 服務接管
+            AIHandler.processAITurnIfNeeded(this);
         }
 
 
@@ -434,95 +417,59 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         const onlineHumans = this.players.filter(p => p.isHuman && p.isOnline);
         const agreedHumans = onlineHumans.filter(p => this.gameState.rematchVotes?.find(v => v.playerId === p.id && v.vote === 'yes'));
         if (onlineHumans.length > 0 && onlineHumans.length === agreedHumans.length) {
-            this.addLog("所有剩餘在線真人玩家已同意再戰，提前開始。");
+            this.addLog("由於有玩家離開，且剩餘所有在線真人玩家已同意再戰，提前開始新比賽。");
             MatchHandler.handleRematchVoteTimeout(this, true);
-        } else if (onlineHumans.length === 0 && this.gameState.rematchVotes && this.gameState.rematchVotes.length === 0) {
-            this.addLog("再戰投票階段已無真人玩家，房間關閉。");
-            TimerManager.clearRematchTimer(this);
-            this.gameState.matchOver = true;
-            const departingSocket = this.io.sockets.sockets.get(socketId);
-            if (departingSocket) {
-                departingSocket.leave(this.roomId);
-            }
-            this.onRoomEmptyCallback();
-            return;
         }
 
-    } else {
+    } else if (this.gameState.gamePhase === GamePhase.ROUND_OVER && removedPlayer.isHuman) {
+        this.addLog(`${removedPlayer.name} 在局間休息時離開。`);
         this.players.splice(playerIndexInArray, 1);
-        this.addLog(`${removedPlayer.name} 已離開房間。`);
         this.io.to(this.roomId).emit('gamePlayerLeft', { playerId: removedPlayer.id, message: `${removedPlayer.name} 已離開房間。` });
 
-        if (removedPlayer.isHuman && this.isEmpty()) {
-            if (this.gameState.gamePhase === GamePhase.WAITING_FOR_PLAYERS) {
-                console.info(`[GameRoom ${this.roomId}] 房間在等待階段因 ${removedPlayer.name} 離開而變空，關閉房間。`);
-                if (this.emptyRoomTimerId) { clearTimeout(this.emptyRoomTimerId); this.emptyRoomTimerId = null; }
-                const departingSocket = this.io.sockets.sockets.get(socketId);
-                if (departingSocket) {
-                    departingSocket.leave(this.roomId);
-                }
-                this.onRoomEmptyCallback();
-                return;
-            } else if (this.gameState.gamePhase === GamePhase.ROUND_OVER) {
-                this.addLog(`所有真人玩家已於本局結束階段離開，取消下一局並準備關閉房間。`);
+        const onlineHumans = this.players.filter(p => p.isHuman && p.isOnline);
+         if (onlineHumans.length > 0 && this.gameState.humanPlayersReadyForNextRound) {
+             this.gameState.humanPlayersReadyForNextRound = this.gameState.humanPlayersReadyForNextRound.filter(id => id !== removedPlayer.id);
+             if (onlineHumans.every(p => this.gameState.humanPlayersReadyForNextRound.includes(p.id))) {
+                this.addLog("由於有玩家離開，且剩餘所有在線真人玩家已確認，提前開始下一局。");
                 TimerManager.clearNextRoundTimer(this);
-                this.gameState.gamePhase = GamePhase.GAME_OVER;
-                this.gameState.matchOver = true;
-                this.broadcastGameState();
-            } else if (this.gameState.gamePhase === GamePhase.GAME_OVER && !this.gameState.matchOver) {
-                this.addLog(`所有真人玩家已於遊戲結束 (局完成) 階段離開，標記比賽結束。`);
-                this.gameState.matchOver = true;
-                this.broadcastGameState();
+                RoundHandler.startGameRound(this, false);
             }
+         }
+
+    } else { // 遊戲未開始，或 AI 離開 (理論上 AI 不會主動離開)
+        this.addLog(logMessage);
+        this.players.splice(playerIndexInArray, 1);
+        this.io.to(this.roomId).emit('gamePlayerLeft', { playerId: removedPlayer.id, message: logMessage });
+    }
+
+    if (removedPlayer.isHost) {
+        const newHost = this.players.find(p => p.isHuman && p.isOnline);
+        if (newHost) {
+            newHost.isHost = true;
+            this.roomSettings.hostName = newHost.name;
+            this.roomSettings.hostSocketId = newHost.socketId;
+            this.gameState.hostPlayerName = newHost.name;
+            this.players.forEach(p => p.isHost = (p.id === newHost.id));
+            this.addLog(`房主 ${removedPlayer.name} 已離開，由 ${newHost.name} 繼任為新房主。`);
+            this.io.to(this.roomId).emit('gamePlayerLeft', { playerId: removedPlayer.id, newHostId: newHost.id, message: `房主 ${removedPlayer.name} 已離開，由 ${newHost.name} 繼任。` });
+        } else {
+             this.addLog(`房主 ${removedPlayer.name} 已離開，且無其他真人玩家可繼任。`);
         }
     }
 
-    if (removedPlayer.isHost && this.players.some(p => p.isHuman && p.isOnline)) {
-        this.assignNewHost();
-    }
-
-    this.sortPlayersById();
     this.updateGameStatePlayers();
     this.broadcastGameState();
+    this.resetEmptyRoomTimer(this.gameState.gamePhase === GamePhase.GAME_OVER && this.gameState.matchOver);
 
-    this.resetEmptyRoomTimer(this.gameState.gamePhase === GamePhase.GAME_OVER || this.gameState.gamePhase === GamePhase.ROUND_OVER || this.gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES);
-
-    const clientSocket = this.io.sockets.sockets.get(socketId);
-    if(clientSocket) {
-        if (!(wasPlayingMidGame && removedPlayer.isHuman && this.isEmpty())) {
-             clientSocket.leave(this.roomId);
-        }
-        delete clientSocket.data.currentRoomId;
-        delete clientSocket.data.playerId;
+    // 如果所有真人玩家都離開了，則請求關閉房間
+    if (this.isEmpty() && this.gameState.gamePhase !== GamePhase.LOADING) {
+        console.info(`[GameRoom ${this.roomId}] 所有真人玩家均已離開，請求關閉房間。`);
+        if (this.emptyRoomTimerId) { clearTimeout(this.emptyRoomTimerId); this.emptyRoomTimerId = null; }
+        this.onRoomEmptyCallback(); // 立即關閉
     }
   }
 
-  /**
-   * @description 當原房主離開後，從房間内已有的真人玩家中指派一位新的房主。
-   */
-  public assignNewHost(): void {
-    this.sortPlayersById();
-    const newHost = this.players.find(p => p.isHuman && p.isOnline);
-    if (newHost) {
-      this.players.forEach(p => p.isHost = (p.id === newHost.id));
-      this.roomSettings.hostName = newHost.name;
-      this.roomSettings.hostSocketId = newHost.socketId!;
-      this.gameState.hostPlayerName = newHost.name;
-      this.addLog(`${newHost.name} (座位: ${newHost.id}) 已被指定為新的房主。`);
-      console.info(`[GameRoom ${this.roomId}] 新房主: ${newHost.name} (Socket: ${newHost.socketId})`);
-    } else {
-      this.roomSettings.hostName = "無";
-      this.roomSettings.hostSocketId = undefined;
-      this.gameState.hostPlayerName = "無";
-      this.addLog(`沒有可用的真人玩家成為新房主。`);
-      console.info(`[GameRoom ${this.roomId}] 沒有可用的真人玩家可成為新房主。`);
-    }
-  }
 
-  /**
-   * @description 處理房主發起的開始遊戲請求。
-   * @param {string} socketId - 發起請求的玩家的 Socket ID。
-   */
   public requestStartGame(socketId: string): void {
     const player = this.players.find(p => p.socketId === socketId);
     if (!player || !player.isHost) {
@@ -530,226 +477,315 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
       return;
     }
     if (this.gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS) {
-      this.io.to(socketId).emit('gameError', '遊戲已經開始或狀態不正確，無法開始。');
+      this.io.to(socketId).emit('gameError', '遊戲已經開始或狀態不正確。');
       return;
     }
 
-    const humanPlayersOnlineCount = this.players.filter(p => p.isHuman && p.isOnline).length;
-    if (humanPlayersOnlineCount < this.roomSettings.humanPlayers) {
-         this.io.to(socketId).emit('gameError', `至少需要 ${this.roomSettings.humanPlayers} 位真人玩家才能開始。目前 ${humanPlayersOnlineCount} 位。`);
+    const humanPlayersCount = this.players.filter(p => p.isHuman && p.isOnline).length;
+    if (humanPlayersCount < this.roomSettings.humanPlayers) {
+        this.io.to(socketId).emit('gameError', `真人玩家數量 (${humanPlayersCount}) 未達到房間設定的目標 (${this.roomSettings.humanPlayers})。`);
         return;
     }
-
-    this.initializeAIPlayers();
-
+    
+    if (this.roomSettings.fillWithAI && this.players.length < NUM_PLAYERS) {
+        this.initializeAIPlayers();
+    }
     if (this.players.length < NUM_PLAYERS) {
-        this.io.to(socketId).emit('gameError', `需要 ${NUM_PLAYERS} 位玩家才能開始遊戲 (AI填充後仍不足)。`);
+         this.io.to(socketId).emit('gameError', `總玩家數量 (${this.players.length}) 不足 ${NUM_PLAYERS}。`);
         return;
     }
 
-    console.info(`[GameRoom ${this.roomId}] 房主 ${player.name} (座位: ${player.id}) 開始遊戲。AI 已填充 (如果需要)。`);
+    this.addLog(`${player.name} (房主) 開始了遊戲。`);
+    console.info(`[GameRoom ${this.roomId}] 房主 ${player.name} 開始遊戲。`);
     RoundHandler.startGameRound(this, true); // isNewMatch = true
   }
 
+  public sendChatMessage(socketId: string, messageText: string): void {
+    if (!messageText.trim()) return;
+    const player = this.players.find(p => p.socketId === socketId);
+    if (!player) return;
 
-  /**
-   * @description 處理來自真人玩家的遊戲動作。
-   * @param {string} socketId - 執行動作的玩家的 Socket ID。
-   * @param {GameActionPayload} action - 玩家執行的動作及其負載。
-   */
+    const chatMessage: ChatMessage = {
+      id: `game-${this.roomId}-${Date.now()}`,
+      senderName: player.name,
+      senderId: socketId,
+      text: messageText.substring(0, 100),
+      timestamp: Date.now(),
+      type: 'player'
+    };
+    this.io.to(this.roomId).emit('gameChatMessage', chatMessage);
+    this.addLog(`[聊天] ${player.name}: ${messageText}`);
+    this.broadcastGameState();
+  }
+
+  public broadcastGameState(): void {
+    this.updateGameStatePlayers();
+    this.io.to(this.roomId).emit('gameStateUpdate', this.getGameState());
+    // console.debug(`[GameRoom ${this.roomId}] 已廣播遊戲狀態至房間。階段: ${this.gameState.gamePhase}`);
+  }
+
+  public broadcastActionAnnouncement(text: string, playerId: number, isMultiHuTarget = false): void {
+    this.io.to(this.roomId).emit('actionAnnouncement', {
+      text: text,
+      playerId: playerId,
+      position: 'bottom', // 此 position 僅為預留，客戶端會根據 clientPlayerId 重新計算
+      id: Date.now() + Math.random(),
+      isMultiHuTarget
+    });
+  }
+
   public handlePlayerAction(socketId: string, action: GameActionPayload): void {
     const player = this.players.find(p => p.socketId === socketId);
-    if (!player || !player.isHuman) {
-        console.warn(`[GameRoom ${this.roomId}] 收到來自非人類或未知 socket (${socketId}) 的動作: `, action);
-        this.io.to(socketId).emit('gameError', '無效的玩家身份。');
+    if (!player) {
+        console.warn(`[GameRoom ${this.roomId}] 來自 socket ${socketId} 的動作，但找不到對應玩家。動作: ${action.type}`);
         return;
     }
+    // 防止短時間內重複提交相同動作
     if (this.actionSubmitLock.has(player.id)) {
-        this.io.to(socketId).emit('gameError', '操作太頻繁或正在處理您的上一個動作。');
+        console.warn(`[GameRoom ${this.roomId}] 玩家 ${player.name} (ID: ${player.id}) 嘗試過快提交動作 ${action.type}，已忽略。`);
+        this.io.to(socketId).emit('gameError', '您的操作太快了，請稍候。');
         return;
     }
     this.actionSubmitLock.add(player.id);
+    setTimeout(() => this.actionSubmitLock.delete(player.id), 500); // 0.5秒後解鎖
 
-    console.debug(`[GameRoom ${this.roomId}] 玩家 ${player.name} (ID: ${player.id}, 真人: ${player.isHuman}) 嘗試執行動作: ${action.type}`, JSON.stringify(action).substring(0, 100));
+    console.info(`[GameRoom ${this.roomId}] 收到玩家 ${player.name} (ID: ${player.id}) 的動作: ${action.type}`, JSON.stringify(action).substring(0,100));
 
-    // 根據動作類型清除相應的計時器
-    // 如果是玩家回合內的動作 (摸牌、打牌、自摸、暗槓、加槓)
-    if (['DRAW_TILE', 'DISCARD_TILE', 'DECLARE_HU', 'DECLARE_AN_GANG', 'DECLARE_MING_GANG_FROM_HAND'].includes(action.type)) {
-        if (player.id === this.gameState.currentPlayerIndex) {
-            TimerManager.clearActionTimer(this);
-        }
-    }
-    // 如果是宣告動作 (碰、吃、槓、跳過、提交宣告)
-    else if (['CLAIM_PENG', 'CLAIM_GANG', 'CLAIM_CHI', 'PASS_CLAIM', 'SUBMIT_CLAIM_DECISION'].includes(action.type)) {
-        // 新的全局宣告模型下，計時器由 ClaimHandler 或 TimerManager.handleGlobalClaimTimeout 清除
-        // 此處不需要特別清除，除非是舊的單人宣告計時器
-        if (this.gameState.actionTimerType === 'claim' && player.id === this.gameState.playerMakingClaimDecision) {
-             TimerManager.clearActionTimer(this);
-        }
-    }
-
-
-    let actionIsValid = true;
-
+    let actionProcessed = false;
     try {
         switch (action.type) {
+            case 'START_GAME_DEAL': // 通常由房主觸發
+                this.requestStartGame(socketId);
+                actionProcessed = true; // requestStartGame 內部會處理廣播和AI
+                break;
             case 'DRAW_TILE':
-                actionIsValid = PlayerActionHandler.processDrawTile(this, player.id);
+                actionProcessed = PlayerActionHandler.processDrawTile(this, player.id);
                 break;
             case 'DISCARD_TILE':
-                actionIsValid = PlayerActionHandler.processDiscardTile(this, player.id, action.tileId);
+                actionProcessed = PlayerActionHandler.processDiscardTile(this, player.id, action.tileId);
                 break;
             case 'DECLARE_HU':
-                actionIsValid = PlayerActionHandler.processDeclareHu(this, player.id);
+                actionProcessed = PlayerActionHandler.processDeclareHu(this, player.id);
                 break;
-            case 'CLAIM_PENG':
-                actionIsValid = PlayerActionHandler.processClaimPeng(this, player.id, action.tile);
+            case 'CLAIM_PENG': // 舊版宣告，可能會被 SUBMIT_CLAIM_DECISION 取代
+                actionProcessed = PlayerActionHandler.processClaimPeng(this, player.id, action.tile);
                 break;
-            case 'CLAIM_GANG':
-                actionIsValid = PlayerActionHandler.processClaimGang(this, player.id, action.tile);
+            case 'CLAIM_GANG': // 舊版宣告
+                actionProcessed = PlayerActionHandler.processClaimGang(this, player.id, action.tile);
                 break;
-            case 'CLAIM_CHI':
-                actionIsValid = PlayerActionHandler.processClaimChi(this, player.id, action.tilesToChiWith, action.discardedTile);
+            case 'CLAIM_CHI': // 舊版宣告
+                actionProcessed = PlayerActionHandler.processClaimChi(this, player.id, action.tilesToChiWith, action.discardedTile);
                 break;
             case 'DECLARE_AN_GANG':
-                actionIsValid = PlayerActionHandler.processDeclareAnGang(this, player.id, action.tileKind);
+                actionProcessed = PlayerActionHandler.processDeclareAnGang(this, player.id, action.tileKind);
                 break;
             case 'DECLARE_MING_GANG_FROM_HAND':
-                actionIsValid = PlayerActionHandler.processDeclareMingGangFromHand(this, player.id, action.tileKind);
+                actionProcessed = PlayerActionHandler.processDeclareMingGangFromHand(this, player.id, action.tileKind);
                 break;
-            case 'SUBMIT_CLAIM_DECISION': // 新增：處理提交宣告決策
-                actionIsValid = PlayerActionHandler.processSubmitClaimDecision(this, action.decision);
+            case 'PASS_CLAIM': // 舊版宣告
+                actionProcessed = PlayerActionHandler.processPassClaim(this, player.id);
                 break;
-            case 'PASS_CLAIM': // 舊的 PASS_CLAIM 會被轉換
-                actionIsValid = PlayerActionHandler.processPassClaim(this, player.id);
+            case 'SUBMIT_CLAIM_DECISION': // 新的宣告提交流程
+                actionProcessed = PlayerActionHandler.processSubmitClaimDecision(this, action.decision);
                 break;
             case 'PLAYER_CONFIRM_NEXT_ROUND':
-                actionIsValid = PlayerActionHandler.processPlayerConfirmNextRound(this, player.id);
+                actionProcessed = RoundHandler.processPlayerConfirmNextRound(this, player.id);
                 break;
             case 'PLAYER_VOTE_REMATCH':
-                actionIsValid = PlayerActionHandler.processPlayerVoteRematch(this, player.id, action.vote);
+                 actionProcessed = MatchHandler.processPlayerVoteRematch(this, player.id, action.vote);
                 break;
             default:
-                console.warn(`[GameRoom ${this.roomId}] 未處理的玩家動作類型:`, (action as any).type);
-                this.io.to(socketId).emit('gameError', '未知的動作類型。');
-                actionIsValid = false;
+                console.warn(`[GameRoom ${this.roomId}] 未處理的玩家動作類型: ${(action as any).type}`);
+                this.io.to(socketId).emit('gameError', `未知的動作類型: ${(action as any).type}`);
         }
+
+        if (actionProcessed) {
+             // AIHandler.processAITurnIfNeeded(this); // 移到各處理函數内部更精確地調用
+        } else if (action.type !== 'START_GAME_DEAL'){ // START_GAME_DEAL 內部已發送錯誤
+            console.warn(`[GameRoom ${this.roomId}] 玩家 ${player.name} 的動作 ${action.type} 處理失敗或無效。`);
+            // 可能需要通知客戶端動作失敗
+        }
+
     } catch (error) {
-        console.error(`[GameRoom ${this.roomId}] 處理玩家 ${player.name} 動作 ${action.type} 時發生錯誤:`, error);
-        this.io.to(socketId).emit('gameError', `處理動作時發生內部錯誤: ${(error as Error).message}`);
-        actionIsValid = false;
-    } finally {
-        this.actionSubmitLock.delete(player.id);
+        console.error(`[GameRoom ${this.roomId}] 處理玩家 ${player.name} 的動作 ${action.type} 時發生錯誤:`, error);
+        this.io.to(socketId).emit('gameError', '處理您的動作時發生內部錯誤。');
+    }
+  }
+
+  // --- 語音聊天處理 ---
+  public handleVoiceChatJoin(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
+    const player = this.players.find(p => p.socketId === socket.id);
+    if (!player) {
+      console.warn(`[VoiceChat ${this.roomId}] Socket ${socket.id} 請求加入語音但未找到對應玩家。`);
+      return;
     }
 
-    if (actionIsValid) {
-        AIHandler.processAITurnIfNeeded(this);
-    } else {
-        // 如果人類玩家的動作無效，且該玩家仍在等待行動，則重新為其啟動計時器
-        const currentPhase = this.gameState.gamePhase;
-        const timerTypeForTurn = 'turn';
-        const timerTypeForClaim = this.gameState.globalClaimTimerActive ? 'global_claim' : 'claim';
+    const existingParticipant = this.voiceParticipants.get(socket.id);
+    if (existingParticipant) {
+        console.log(`[VoiceChat ${this.roomId}] ${player.name} 已在語音聊天中。`);
+        // 仍然發送 user list 給他，以防他重連需要重新建立 peer connections
+        socket.emit('voiceChatUserList', { users: Array.from(this.voiceParticipants.values()) });
+        return;
+    }
 
-        if (player.id === this.gameState.currentPlayerIndex &&
-            (currentPhase === GamePhase.PLAYER_TURN_START ||
-             currentPhase === GamePhase.PLAYER_DRAWN ||
-             currentPhase === GamePhase.AWAITING_DISCARD)) {
-           TimerManager.startActionTimerForPlayer(this, player.id, timerTypeForTurn);
-           this.broadcastGameState();
-        } else if (
-            ( (currentPhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION && player.id === this.gameState.playerMakingClaimDecision) ||
-              (currentPhase === GamePhase.ACTION_PENDING_CHI_CHOICE && player.id === this.gameState.playerMakingClaimDecision) ||
-              (currentPhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE && player.pendingClaims && player.pendingClaims.length > 0 && !player.hasRespondedToClaim)
-            )
-        ) {
-            // 如果是全局宣告階段且動作無效，通常不重啟單人計時器，而是等待全局計時器或玩家重新提交有效決策
-            if (currentPhase !== GamePhase.AWAITING_ALL_CLAIMS_RESPONSE) {
-                 TimerManager.startActionTimerForPlayer(this, player.id, timerTypeForClaim as 'claim'); // 確保類型正確
-            }
-           this.broadcastGameState();
+    const newParticipant: VoiceChatUser = {
+      socketId: socket.id,
+      playerId: player.id,
+      playerName: player.name,
+      isMuted: socket.data.isMutedInVoiceChat || false, // 從 socket.data 初始化靜音狀態
+    };
+    this.voiceParticipants.set(socket.id, newParticipant);
+    player.isMuted = newParticipant.isMuted; // 同步到 ServerPlayer 物件
+
+    console.log(`[VoiceChat ${this.roomId}] ${player.name} (Socket: ${socket.id}) 加入語音聊天。目前參與者: ${this.voiceParticipants.size} 人。`);
+
+    // 發送當前房間內所有語音參與者列表給新加入者
+    socket.emit('voiceChatUserList', { users: Array.from(this.voiceParticipants.values()) });
+
+    // 通知房間內其他語音參與者有新成員加入
+    socket.to(this.roomId).emit('voiceChatUserJoined', newParticipant);
+    this.updateGameStatePlayers(); // 更新 GameState 中的 isMuted
+    this.broadcastGameState(); // 廣播狀態
+  }
+
+  public handleVoiceChatLeave(socketId: string): void {
+    const participant = this.voiceParticipants.get(socketId);
+    if (participant) {
+      this.voiceParticipants.delete(socketId);
+      const player = this.players.find(p => p.socketId === socketId);
+      if (player) {
+          player.isMuted = undefined; // 清除 ServerPlayer 的 isMuted
+          player.isSpeaking = undefined; // 清除 ServerPlayer 的 isSpeaking
+      }
+
+      console.log(`[VoiceChat ${this.roomId}] ${participant.playerName} (Socket: ${socketId}) 離開語音聊天。剩餘參與者: ${this.voiceParticipants.size} 人。`);
+      // 通知房間內其他語音參與者此成員已離開
+      this.io.to(this.roomId).emit('voiceChatUserLeft', { socketId });
+      this.updateGameStatePlayers();
+      this.broadcastGameState();
+    }
+  }
+
+  public handleVoiceChatSignal(fromSocketId: string, data: { toSocketId: string; signal: any }): void {
+    const recipientSocket = this.io.sockets.sockets.get(data.toSocketId);
+    if (recipientSocket) {
+      console.debug(`[VoiceChat ${this.roomId}] 轉發從 ${fromSocketId} 到 ${data.toSocketId} 的 WebRTC 信令。`);
+      recipientSocket.emit('voiceSignal', { fromSocketId, signal: data.signal });
+    } else {
+      console.warn(`[VoiceChat ${this.roomId}] 嘗試轉發信令到 ${data.toSocketId}，但目標 Socket 未找到。`);
+    }
+  }
+
+  public handleVoiceChatToggleMute(socketId: string, data: { muted: boolean }): void {
+    const participant = this.voiceParticipants.get(socketId);
+    const playerSocket = this.io.sockets.sockets.get(socketId);
+
+    if (participant && playerSocket) {
+      participant.isMuted = data.muted;
+      playerSocket.data.isMutedInVoiceChat = data.muted; // 更新 socket.data 中的狀態
+      const player = this.players.find(p => p.socketId === socketId);
+      if (player) {
+          player.isMuted = data.muted; // 同步到 ServerPlayer
+      }
+
+      console.log(`[VoiceChat ${this.roomId}] ${participant.playerName} (Socket: ${socketId}) ${data.muted ? '已靜音' : '已取消靜音'}`);
+      this.io.to(this.roomId).emit('voiceChatUserMuted', { socketId, muted: data.muted });
+      this.updateGameStatePlayers();
+      this.broadcastGameState();
+    }
+  }
+
+  public handleVoiceChatSpeakingUpdate(socketId: string, data: { speaking: boolean }): void {
+    const participant = this.voiceParticipants.get(socketId);
+    if (participant) {
+        // 更新 participant 內部狀態 (如果需要)
+        // participant.isSpeaking = data.speaking; // VoiceChatUser 類型中沒有 isSpeaking，依賴 Player
+        const player = this.players.find(p => p.socketId === socketId);
+        if (player) {
+            player.isSpeaking = data.speaking;
         }
+
+        // console.debug(`[VoiceChat ${this.roomId}] ${participant.playerName} (Socket: ${socketId}) 發言狀態: ${data.speaking}`);
+        this.io.to(this.roomId).emit('voiceChatUserSpeaking', { socketId, speaking: data.speaking });
+        this.updateGameStatePlayers(); // 更新 gameState.players
+        this.broadcastGameState(); // 廣播包含 isSpeaking 的狀態
     }
   }
 
 
-    /**
-     * @description 向房間內所有客戶端廣播當前遊戲狀態。
-     */
-    public broadcastGameState(): void {
-        this.io.to(this.roomId).emit('gameStateUpdate', this.getGameState());
+  public destroy(): void {
+    console.info(`[GameRoom ${this.roomId}] 正在銷毀房間 ${this.roomSettings.roomName}...`);
+    TimerManager.clearActionTimer(this);
+    TimerManager.clearNextRoundTimer(this);
+    TimerManager.clearRematchTimer(this);
+    TimerManager.clearRoundTimeoutTimer(this);
+    AIHandler.clearAiActionTimeout(this);
+    if (this.emptyRoomTimerId) {
+      clearTimeout(this.emptyRoomTimerId);
+      this.emptyRoomTimerId = null;
     }
-
-    /**
-     * @description 處理遊戲內聊天訊息的發送。
-     * @param {string} socketId - 發送訊息的玩家的 Socket ID。
-     * @param {string} messageText - 訊息內容。
-     */
-    public sendChatMessage(socketId: string, messageText: string): void {
-        const player = this.players.find(p => p.socketId === socketId);
-        if (!player || !messageText.trim()) return;
-
-        const chatMessage: ChatMessage = {
-            id: `game-chat-${this.roomId}-${Date.now()}`,
-            senderName: player.name,
-            senderId: player.socketId || player.id.toString(),
-            text: messageText.substring(0, 150),
-            timestamp: Date.now(),
-            type: 'player'
-        };
-        this.io.to(this.roomId).emit('gameChatMessage', chatMessage);
-        this.addLog(`[聊天] ${player.name} (座位: ${player.id}): ${messageText}`);
-    }
-
-
-    /**
-     * @description 向房間內所有客戶端廣播一個動作宣告的視覺特效。
-     * @param {string} text - 宣告的文字 (例如："碰", "胡", 或牌面)。
-     * @param {number} playerId - 執行動作的玩家ID (座位索引)。
-     * @param {boolean} [isMultiHuTarget=false] - 是否為一炮多響的目標之一。
-     */
-    public broadcastActionAnnouncement(text: string, playerId: number, isMultiHuTarget = false): void {
-        this.io.to(this.roomId).emit('actionAnnouncement', {
-            text,
-            playerId,
-            position: 'bottom', // 此 position 值會在客戶端被重新計算為相對位置
-            id: Date.now() + Math.random(),
-            isMultiHuTarget: isMultiHuTarget,
+    // 可以在此處向房間內所有玩家發送一個房間解散的通知
+    this.io.to(this.roomId).emit('gameError', '房間已被解散。');
+    // 強制房間內所有 socket 離開
+    const socketsInRoom = this.io.sockets.adapter.rooms.get(this.roomId);
+    if (socketsInRoom) {
+        socketsInRoom.forEach(socketId => {
+            const s = this.io.sockets.sockets.get(socketId);
+            if (s) {
+                s.leave(this.roomId);
+                // 可以選擇性地將他們移回大廳
+                s.join(LOBBY_ROOM_NAME);
+                console.info(`[GameRoom ${this.roomId}] Socket ${socketId} 因房間解散已移至大廳。`);
+            }
         });
     }
+    this.voiceParticipants.clear(); // 清理語音參與者
+    console.info(`[GameRoom ${this.roomId}] 房間 ${this.roomSettings.roomName} 已銷毀。`);
+  }
 
-    /**
-     * @description 請求關閉房間 (通常在遊戲結束且無人再戰時調用)。
-     */
-    public requestClosure(): void {
+   public requestClosure(): void {
         this.onRoomEmptyCallback();
     }
 
-    /**
-     * @description 銷毀遊戲房間，清除所有計時器。
-     */
-    public destroy(): void {
-        TimerManager.clearActionTimer(this);
-        TimerManager.clearNextRoundTimer(this);
-        TimerManager.clearRematchTimer(this);
-        TimerManager.clearRoundTimeoutTimer(this);
-        TimerManager.clearGlobalClaimTimer(this); // 清除新的全局宣告計時器
-        AIHandler.clearAiActionTimeout(this);
-        if (this.emptyRoomTimerId) {
-            clearTimeout(this.emptyRoomTimerId);
-            this.emptyRoomTimerId = null;
-        }
-        this.io.to(this.roomId).emit('gameError', '房間已被解散。');
-        this.players.forEach(player => {
-            if (player.socketId) {
-                const socket = this.io.sockets.sockets.get(player.socketId);
-                if (socket) {
-                    socket.leave(this.roomId);
-                    delete socket.data.currentRoomId;
-                    delete socket.data.playerId;
-                }
-            }
-        });
-        this.players = [];
-        console.info(`[GameRoom ${this.roomId}] 已銷毀。`);
-    }
+
+  // 模組化處理函數的綁定
+  public processDrawTile = (playerId: number) => PlayerActionHandler.processDrawTile(this, playerId);
+  public processDiscardTile = (playerId: number, tileId: string) => PlayerActionHandler.processDiscardTile(this, playerId, tileId);
+  public processDeclareHu = (playerId: number) => PlayerActionHandler.processDeclareHu(this, playerId);
+  public processClaimPeng = (playerId: number, tile: Tile) => PlayerActionHandler.processClaimPeng(this, playerId, tile);
+  public processClaimGang = (playerId: number, tile: Tile) => PlayerActionHandler.processClaimGang(this, playerId, tile);
+  public processClaimChi = (playerId: number, tilesToChiWith: Tile[], discardedTile: Tile) => PlayerActionHandler.processClaimChi(this, playerId, tilesToChiWith, discardedTile);
+  public processDeclareAnGang = (playerId: number, tileKind: TileKind) => PlayerActionHandler.processDeclareAnGang(this, playerId, tileKind);
+  public processDeclareMingGangFromHand = (playerId: number, tileKind: TileKind) => PlayerActionHandler.processDeclareMingGangFromHand(this, playerId, tileKind);
+  public processPassClaim = (playerId: number) => PlayerActionHandler.processPassClaim(this, playerId);
+  public processSubmitClaimDecision = (decision: SubmittedClaim) => PlayerActionHandler.processSubmitClaimDecision(this, decision);
+
+
+  public checkForClaims = (discardedTile: Tile, discarderId: number) => ClaimHandler.checkForClaims(this, discardedTile, discarderId);
+  public resolveAllSubmittedClaims = () => ClaimHandler.resolveAllSubmittedClaims(this);
+  public clearClaimsAndTimer = () => ClaimHandler.clearClaimsAndTimer(this);
+  public handleInvalidClaim = (player: ServerPlayer, claimType: string) => ClaimHandler.handleInvalidClaim(this, player, claimType);
+
+  public advanceToNextPlayerTurn = (afterDiscard: boolean) => TurnHandler.advanceToNextPlayerTurn(this, afterDiscard);
+
+  public initializeOrResetGameForRound = (isNewMatch: boolean) => RoundHandler.initializeOrResetGameForRound(this, isNewMatch);
+  public startGameRound = (isNewMatch: boolean) => RoundHandler.startGameRound(this, isNewMatch);
+  public handleRoundEndFlow = () => RoundHandler.handleRoundEndFlow(this);
+  public processPlayerConfirmNextRound = (playerId: number) => RoundHandler.processPlayerConfirmNextRound(this, playerId);
+
+  public handleMatchEnd = () => MatchHandler.handleMatchEnd(this);
+  public processPlayerVoteRematch = (playerId: number, vote: 'yes') => MatchHandler.processPlayerVoteRematch(this, playerId, vote);
+  public handleRematchVoteTimeout = (isEarlyStart: boolean) => MatchHandler.handleRematchVoteTimeout(this, isEarlyStart);
 }
+
+
+/**
+* @description 伺服器端的遊戲主循環或事件處理器。
+* GameRoom 實例會在其內部處理大部分遊戲邏輯，
+* RoomManager 會處理房間的創建、加入、玩家斷線等。
+* 此處不需要額外的 "gameLoop" 函數。
+* 遊戲的推進是事件驅動的 (玩家動作、計時器到期)。
+*/
+// export function gameLoop(room: GameRoom) {
+//   // 遊戲主循環邏輯已分散到各個處理函數和計時器回調中
+// }

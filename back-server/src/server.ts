@@ -5,7 +5,7 @@
 import './logger';
 
 // ✅ 加入 express
-import express from 'express'; 
+import express from 'express';
 // 引入 Node.js http 模組用於創建 HTTP 伺服器
 import { createServer } from 'http';
 // 引入 Socket.IO Server 類別及相關類型
@@ -48,6 +48,8 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
   socket.data.playerName = Array.isArray(initialNameFromQuery)
     ? initialNameFromQuery[0] // 如果是陣列，取第一個
     : initialNameFromQuery || `${DEFAULT_PLAYER_NAME}${Math.floor(Math.random() * 10000)}`; // 否則使用查詢參數或生成隨機名稱
+  socket.data.isMutedInVoiceChat = false; // 初始化語音靜音狀態
+
 
   // --- 使用者管理事件 ---
   // 監聽客戶端 'userSetName' 事件 (設定玩家名稱)
@@ -154,12 +156,62 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
     roomManager.leaveRoom(socket, roomId); // 呼叫 RoomManager 處理
   });
 
+  // --- 語音聊天事件 ---
+  socket.on('voiceChatJoinRoom', (data) => {
+    const room = roomManager.getRoomById(data.roomId);
+    if (room && room.hasPlayer(socket.id)) {
+      room.handleVoiceChatJoin(socket);
+    } else {
+      console.warn(`[Server] Socket ${socket.id} 請求加入語音聊天室 ${data.roomId} 失敗：房間不存在或玩家不在該房間。`);
+    }
+  });
+
+  socket.on('voiceSignal', (data) => {
+    const roomId = socket.data.currentRoomId;
+    if (roomId) {
+        const room = roomManager.getRoomById(roomId);
+        if (room) {
+            room.handleVoiceChatSignal(socket.id, data);
+        }
+    }
+  });
+
+  socket.on('voiceChatToggleMute', (data) => {
+    const roomId = socket.data.currentRoomId;
+    if (roomId) {
+        const room = roomManager.getRoomById(roomId);
+        if (room) {
+            room.handleVoiceChatToggleMute(socket.id, data);
+        }
+    }
+  });
+
+  socket.on('voiceChatSpeakingUpdate', (data) => {
+    const roomId = socket.data.currentRoomId;
+    if (roomId) {
+        const room = roomManager.getRoomById(roomId);
+        if (room) {
+            room.handleVoiceChatSpeakingUpdate(socket.id, data);
+        }
+    }
+  });
+
+
   // --- 斷線處理 ---
   // 監聽 Socket 'disconnect' 事件
   socket.on('disconnect', (reason) => {
     console.info(`[Server] 連接斷開: ${socket.id} (${socket.data.playerName})。原因: ${reason}`); // Log level adjusted
     socket.leave(LOBBY_ROOM_NAME); // 確保斷線玩家離開大廳群組
-    roomManager.handlePlayerDisconnect(socket); // 呼叫 RoomManager 處理玩家斷線
+
+    // 也處理語音聊天離開
+    const roomIdForVoice = socket.data.currentRoomId;
+    if (roomIdForVoice) {
+        const room = roomManager.getRoomById(roomIdForVoice);
+        if (room) {
+             room.handleVoiceChatLeave(socket.id); // GameRoom內部也會調用此函數，但這裡確保語音狀態被清理
+        }
+    }
+    roomManager.handlePlayerDisconnect(socket); // 呼叫 RoomManager 處理玩家斷線 (這會處理遊戲邏輯上的離開)
   });
 
 });
