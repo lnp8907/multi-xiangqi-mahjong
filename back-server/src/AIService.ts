@@ -36,8 +36,8 @@ const estimateTileDanger = (tileToDiscard: Tile, gameState: GameState): number =
   const occurrencesInDiscard = gameState.discardPile.filter(info => info.tile.kind === tileToDiscard.kind).length;
 
   // 棄牌堆中出現次數越少，代表越可能是生張，危險度越高
-  if (occurrencesInDiscard === 0) danger += 6;      // 未見過，高度危險
-  else if (occurrencesInDiscard === 1) danger += 3; // 已見一張，中度危險
+  if (occurrencesInDiscard === 0) danger += 5;      // 未見過，高度危險
+  else if (occurrencesInDiscard === 1) danger += 2; // 已見一張，中度危險
   else if (occurrencesInDiscard === 2) danger += 1; // 已見兩張，相對安全
 
   // 象棋牌中，某些關鍵牌（將帥、車馬炮等，即非 group 0 的牌）通常更容易被其他玩家需要
@@ -303,16 +303,24 @@ export class AIService {
         const { gamePhase, lastDiscardedTile, lastDrawnTile, currentPlayerIndex, playerMakingClaimDecision } = gameState;
 
         // 1. 處理宣告棄牌的邏輯
-        //    當有棄牌，且輪到此 AI 決定是否宣告時
-        if ((gamePhase === GamePhase.TILE_DISCARDED || 
-             gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION || 
-             gamePhase === GamePhase.AWAITING_CLAIMS_RESOLUTION) && 
-            lastDiscardedTile &&
-            playerMakingClaimDecision === aiPlayer.id) { // 確認是此 AI 在做宣告決定
-            
-            // 使用 getClaimForAI 函數獲取宣告動作，如果沒有則跳過
-            return this.getClaimForAI(aiPlayer, lastDiscardedTile, gameState) || { type: 'PASS_CLAIM' };
+        const canAIClaimNow = lastDiscardedTile && (
+            ( // 新的併發宣告流程
+              gamePhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE &&
+              aiPlayer.pendingClaims && aiPlayer.pendingClaims.length > 0
+            ) ||
+            ( // 舊的、逐步詢問的宣告流程
+              ( gamePhase === GamePhase.TILE_DISCARDED ||
+                gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION ||
+                gamePhase === GamePhase.AWAITING_CLAIMS_RESOLUTION
+              ) && playerMakingClaimDecision === aiPlayer.id
+            )
+        );
+
+        if (canAIClaimNow) {
+            console.debug(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 進入宣告邏輯。階段: ${gamePhase}, playerMakingDecision: ${playerMakingClaimDecision}, pendingClaims: ${aiPlayer.pendingClaims?.length}`);
+            return this.getClaimForAI(aiPlayer, lastDiscardedTile!, gameState) || { type: 'PASS_CLAIM' };
         }
+
 
         // 2. AI 輪到自己回合的邏輯
         if (currentPlayerIndex === aiPlayer.id) { // 確認輪到此 AI 行動
@@ -336,7 +344,7 @@ export class AIService {
         }
         
         // 預設或錯誤狀態處理：AI 跳過
-        console.warn(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在未預期的遊戲階段 (${gamePhase}) 被要求行動，或非其決策回合。將跳過。`); // Log level adjusted
+        console.warn(`[AIService] AI ${aiPlayer.name} (Seat: ${aiPlayer.id}) 在未預期的遊戲階段 (${gamePhase}) 或非其決策回合被要求行動。將跳過。 CurrentPlayer: ${currentPlayerIndex}, PlayerMakingClaimDecision: ${playerMakingClaimDecision}`); // Log level adjusted
         return { type: 'PASS_CLAIM' };
     }
 
