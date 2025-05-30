@@ -198,12 +198,13 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
     const scrollableClasses = "overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800";
 
     if (position === 'left') {
-      return <div className={`flex flex-col-reverse items-center justify-start space-y-2 ${scrollableClasses} h-full w-full p-1`}>{handDisplay}{meldsDisplay}</div>;
+      // MODIFIED: 調整 meldsDisplay 和 handDisplay 的順序
+      return <div className={`flex flex-col-reverse items-center justify-start space-y-2 ${scrollableClasses} h-full w-full p-1`}>{meldsDisplay}{handDisplay}</div>;
     } else if (position === 'right') {
       return <div className={`flex flex-col items-center justify-start space-y-2 ${scrollableClasses} h-full w-full p-1`}>{meldsDisplay}{handDisplay}</div>;
     } else if (position === 'bottom') {
       return <div className={`flex flex-col items-center justify-center w-full h-full p-1 space-y-1 ${scrollableClasses}`}>{meldsDisplay}{handDisplay}</div>;
-    } else {
+    } else { // top
       return <div className={`flex flex-col items-center justify-center w-full h-full p-1 space-y-1 ${scrollableClasses}`}>{handDisplay}{meldsDisplay}</div>;
     }
   };
