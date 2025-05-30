@@ -4,6 +4,7 @@ import ActionButton from './ActionButton'; // 引入動作按鈕組件
 import LockIcon from './icons/LockIcon';   // 引入鎖圖示組件
 import MicrophoneOnIcon from './icons/MicrophoneOnIcon'; // 引入麥克風開啟圖示
 import MicrophoneOffIcon from './icons/MicrophoneOffIcon'; // 引入麥克風關閉圖示
+import SettingsIcon from './icons/SettingsIcon'; // *** 新增：引入設定圖示 ***
 import LobbyLeaderboard from './LobbyLeaderboard'; // 新增排行榜組件
 import LobbyChatPanel from './LobbyChatPanel';   // 新增聊天面板組件
 import { RoomListData, ChatMessage, ServerToClientEvents, ClientToServerEvents } from '../types'; // 引入類型定義
@@ -25,6 +26,8 @@ interface LobbyProps {
   lobbyRooms: RoomListData[];
   /** @param {Socket<ServerToClientEvents, ClientToServerEvents>} socket - Socket.IO 連接實例。 */
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
+  /** @param {() => void} onToggleSettingsPanel - *** 新增：切換設定面板顯示的回調函數。 *** */
+  onToggleSettingsPanel: () => void;
 }
 
 /**
@@ -38,7 +41,8 @@ const Lobby: React.FC<LobbyProps> = ({
     onReturnToHome, 
     currentPlayerName,
     lobbyRooms, // 房間列表現在由 App.tsx 透過 props 傳入
-    socket
+    socket,
+    onToggleSettingsPanel // *** 新增：解構 onToggleSettingsPanel prop ***
 }) => {
   // isLoadingRooms 狀態用於可能的初始加載提示，但房間列表主要依賴 props
   const [isLoadingRooms, setIsLoadingRooms] = useState(false); 
@@ -91,7 +95,18 @@ const Lobby: React.FC<LobbyProps> = ({
 
   return (
     // 大廳主容器：彈性佈局，在中大螢幕上為橫向排列，小螢幕為縱向
-    <div className="w-full h-full flex flex-col md:flex-row p-4 gap-4 max-w-6xl mx-auto max-h-[calc(100vh-80px)]"> {/* 限制最大高度以避免頁腳被遮擋 */}
+    <div className="w-full h-full flex flex-col md:flex-row p-4 gap-4 max-w-6xl mx-auto max-h-[calc(100vh-80px)] relative"> {/* 新增 relative */}
+      {/* *** 新增：右上角設定按鈕 *** */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+            onClick={onToggleSettingsPanel}
+            className="p-2 bg-slate-700/50 hover:bg-slate-600 rounded-full text-white transition-colors"
+            aria-label="開啟設定"
+            title="設定"
+        >
+            <SettingsIcon className="w-5 h-5" />
+        </button>
+      </div>
       {/* 左側區域：操作按鈕和房間列表 */}
       <div className="flex flex-col w-full md:w-2/3 space-y-4">
         {/* 操作按鈕區域 */}

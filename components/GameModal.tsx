@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 
 /**
@@ -13,6 +12,8 @@ interface GameModalProps {
   children: React.ReactNode;
   /** @param {() => void} [onClose] - 可選的關閉模態框時觸發的回調函數。 */
   onClose?: () => void;
+  /** @param {string} [backdropOpacityClass] - 可選的自訂背景遮罩透明度 CSS class，例如 'bg-black/40'。 */
+  backdropOpacityClass?: string;
 }
 
 /**
@@ -20,7 +21,13 @@ interface GameModalProps {
  * @param {GameModalProps} props - 組件的屬性。
  * @returns {React.FC | null} React 函數組件，或在不應渲染時返回 null。
  */
-const GameModal: React.FC<GameModalProps> = ({ isOpen, title, children, onClose }) => {
+const GameModal: React.FC<GameModalProps> = ({ 
+  isOpen, 
+  title, 
+  children, 
+  onClose, 
+  backdropOpacityClass = 'bg-black/75' // 預設背景遮罩
+}) => {
   // `shouldRender` 狀態用於控制模態框在 DOM 中的實際渲染，以便在 `isOpen` 變為 false 後仍能播放出場動畫。
   const [shouldRender, setShouldRender] = useState(isOpen);
 
@@ -44,7 +51,7 @@ const GameModal: React.FC<GameModalProps> = ({ isOpen, title, children, onClose 
     <div 
       className={`fixed inset-0 flex items-center justify-center z-[70] p-4
                   transition-opacity duration-300 ease-in-out
-                  ${isOpen ? 'opacity-100 bg-black/75' : 'opacity-0 bg-black/0 pointer-events-none'}`}
+                  ${isOpen ? `opacity-100 ${backdropOpacityClass}` : 'opacity-0 pointer-events-none'}`}
       // 如果提供了 onClose 回調，則點擊背景遮罩時觸發關閉 (e.target === e.currentTarget 確保點擊的是遮罩本身而非內容)。
       onClick={onClose ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined} 
       aria-modal="true" // 輔助功能：標識為模態對話框。
@@ -52,7 +59,7 @@ const GameModal: React.FC<GameModalProps> = ({ isOpen, title, children, onClose 
     >
       {/* 模態框的內容容器 */}
       <div 
-        className={`bg-slate-800 p-6 rounded-lg shadow-xl max-w-md w-full border border-slate-600
+        className={`bg-slate-800/90 p-6 rounded-lg shadow-xl max-w-md w-full border border-slate-600
                     transition-all duration-300 ease-in-out
                     ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-5'}`}
         // 阻止點擊模態框內容區域時觸發背景遮罩的 onClick 事件 (事件冒泡)。

@@ -543,7 +543,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
         <ActionAnnouncer key={ann.id} announcement={ann} />
       ))}
 
-      {gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS && gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && (
+      {/* MODIFIED: 移除 gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES 條件 */}
+      {gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS && (
         <>
           <div className="col-start-2 row-start-1 flex">
             {renderPlayer('top')}
@@ -790,6 +791,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               isOpen={true}
               title={gameOverModalTitle}
               onClose={showFinalMatchResultsModalStep === 'finalScore' ? onQuitGame : undefined}
+              backdropOpacityClass="bg-black/40"
           >
               {showFinalMatchResultsModalStep === 'roundResult' && (
                   <>

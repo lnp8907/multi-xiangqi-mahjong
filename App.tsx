@@ -637,6 +637,8 @@ const App: React.FC = () => {
     addNotification("已離開遊戲房間。", "info");
   }, [currentRoomId, playerName, addNotification, cleanupWebRTC]);
 
+  // *** 新增：用於切換設定面板的函數 ***
+  const toggleSettingsPanel = () => setShowSettingsPanel(prev => !prev);
 
   // --- 渲染邏輯 ---
   const renderView = () => {
@@ -655,6 +657,7 @@ const App: React.FC = () => {
             currentPlayerName={playerName}
             lobbyRooms={lobbyRooms}
             socket={socket}
+            onToggleSettingsPanel={toggleSettingsPanel} // *** 新增：傳遞 prop ***
           />
         ) : (
           <div className="text-center p-8">
@@ -679,7 +682,7 @@ const App: React.FC = () => {
             initialGameState={currentGameState}
             clientPlayerId={clientPlayerIdRef.current} 
             onQuitGame={handleQuitGame}
-            toggleSettingsPanel={() => setShowSettingsPanel(prev => !prev)}
+            toggleSettingsPanel={toggleSettingsPanel} // *** 使用 toggleSettingsPanel ***
             socket={socket}
             addNotification={addNotification}
             isMicrophoneMuted={isMicrophoneMuted}
