@@ -11,6 +11,7 @@ import * as TurnHandler from './turnHandler';
 import * as RoundHandler from './roundHandler';
 import * as MatchHandler from './matchHandler'; // Import MatchHandler
 import * as TimerManager from './timerManager'; // 標準導入 TimerManager
+import * as AIHandler from './aiHandler'; // 新增引入 AIHandler
 
 
 /**
@@ -40,7 +41,14 @@ export const processDrawTile = (room: GameRoom, playerId: number): boolean => {
     room.gameState.gamePhase = GamePhase.PLAYER_DRAWN;
     room.addLog(`${player.name} (座位: ${player.id}) 摸了一張牌${player.isHuman && player.isOnline ? ` (${drawnTile.kind})` : ''}。`);
     TimerManager.startActionTimerForPlayer(room, playerId, 'turn'); 
-    if (!player.isHuman || !player.isOnline) room.broadcastGameState(); 
+    // AI 會在 AIHandler.processAITurnIfNeeded 中處理，此處無需立即廣播給 AI
+    // 如果是真人玩家摸牌，則立即廣播
+    if (player.isHuman && player.isOnline) {
+        room.broadcastGameState();
+    } else {
+        // 如果是 AI 摸牌，確保 AIHandler 有機會處理
+        AIHandler.processAITurnIfNeeded(room);
+    }
     return true;
 };
 
@@ -169,12 +177,19 @@ export const processSubmitClaimDecision = (room: GameRoom, decision: SubmittedCl
         p.isHuman && p.isOnline && (p.pendingClaims && p.pendingClaims.length > 0)
     );
     const allHumansResponded = humanPlayersWithPendingClaims.every(p => p.hasRespondedToClaim);
+    const allAIsResponded = room.players.filter(p => (!p.isHuman || !p.isOnline) && (p.pendingClaims && p.pendingClaims.length > 0))
+                                       .every(p => room.gameState.submittedClaims.find(sc => sc.playerId === p.id));
 
-    if (allHumansResponded) {
-        room.addLog("所有需要回應的真人玩家均已提交決策。");
+
+    if (allHumansResponded && allAIsResponded) {
+        room.addLog("所有需要回應的玩家均已提交決策或自動處理。");
         ClaimHandler.resolveAllSubmittedClaims(room); // 立即裁決
     } else {
-        room.addLog(`等待其他 ${humanPlayersWithPendingClaims.filter(p=>!p.hasRespondedToClaim).length} 位真人玩家回應宣告...`);
+        const humansNeedingResponse = humanPlayersWithPendingClaims.filter(p => !p.hasRespondedToClaim).length;
+        const aisNeedingResponse = room.players.filter(p => (!p.isHuman || !p.isOnline) && (p.pendingClaims && p.pendingClaims.length > 0) && !room.gameState.submittedClaims.find(sc => sc.playerId === p.id)).length;
+        if (humansNeedingResponse > 0 || aisNeedingResponse > 0) {
+            room.addLog(`等待其他 ${humansNeedingResponse} 位真人玩家和 ${aisNeedingResponse} 位 AI 回應宣告...`);
+        }
     }
     room.broadcastGameState(); // 廣播狀態以更新 UI (例如，顯示誰已回應)
     return true;
@@ -377,6 +392,7 @@ export const processClaimPeng = (room: GameRoom, playerId: number, tileToPeng: T
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id, 'turn'); 
     room.broadcastGameState();
+    AIHandler.processAITurnIfNeeded(room); // 修正：碰牌後輪到AI出牌
     return true;
 };
 
@@ -423,6 +439,7 @@ export const processClaimGang = (room: GameRoom, playerId: number, tileToGang: T
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id, 'turn'); 
     room.broadcastGameState();
+    AIHandler.processAITurnIfNeeded(room); // 槓牌後輪到AI摸牌
     return true;
 };
 
@@ -510,6 +527,7 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id, 'turn'); 
     room.broadcastGameState();
+    AIHandler.processAITurnIfNeeded(room); // 修正：吃牌後輪到AI出牌
     return true;
 };
 
@@ -523,51 +541,65 @@ export const processClaimChi = (room: GameRoom, playerId: number, tilesToChiWith
  */
 export const processDeclareAnGang = (room: GameRoom, playerId: number, tileKindToGang: TileKind): boolean => {
     const player = room.players.find(p => p.id === playerId);
-    if (!player) return false;
+    if (!player) { console.error(`[GameRoom ${room.roomId}] processDeclareAnGang: 玩家 ${playerId} 未找到。`); return false; }
     
     if (room.gameState.currentPlayerIndex !== playerId ||
-        (room.gameState.gamePhase !== GamePhase.PLAYER_TURN_START && room.gameState.gamePhase !== GamePhase.PLAYER_DRAWN &&
-        !(room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1))
+        (room.gameState.gamePhase !== GamePhase.PLAYER_TURN_START && 
+         room.gameState.gamePhase !== GamePhase.PLAYER_DRAWN &&
+         !(room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1))
        ) {
         if(player.socketId) room.io.to(player.socketId).emit('gameError', '現在不是宣告暗槓的時機。');
         return false;
     }
     TimerManager.clearActionTimer(room); // 清除回合計時器
 
-    const handForAnGangCheck = (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile)
-        ? [...player.hand, room.gameState.lastDrawnTile]
-        : (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile)
-        ? [...player.hand, room.gameState.lastDrawnTile]
-        : player.hand;
+    const isDrawnTilePartOfGang = room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && 
+                                  room.gameState.lastDrawnTile?.kind === tileKindToGang;
 
-    if (countTilesOfKind(handForAnGangCheck, tileKindToGang) < 4) {
-         if(player.socketId) room.io.to(player.socketId).emit('gameError', `您沒有四張 ${tileKindToGang} 可以暗槓。`);
-         TimerManager.startActionTimerForPlayer(room, playerId, 'turn'); // 操作失敗，重啟計時器
+    // 檢查是否有足夠的牌來暗槓 (包含剛摸的牌，如果適用)
+    const effectiveHandForCheck = isDrawnTilePartOfGang 
+        ? [...player.hand, room.gameState.lastDrawnTile!] 
+        : player.hand; // 如果不是PLAYER_DRAWN摸到槓牌，或PLAYER_TURN_START，則只檢查手牌
+
+    if (countTilesOfKind(effectiveHandForCheck, tileKindToGang) < 4) {
+        if(player.socketId) room.io.to(player.socketId).emit('gameError', `您沒有四張 ${tileKindToGang} 可以暗槓。`);
+        TimerManager.startActionTimerForPlayer(room, playerId, 'turn'); // 操作失敗，重啟計時器
         return false;
     }
 
-    const { handAfterAction, newMeldTiles } = removeTilesFromHand(player.hand, tileKindToGang, 4);
-    if (!newMeldTiles) { 
-         if(player.socketId) room.io.to(player.socketId).emit('gameError', `暗槓時移除手牌失敗。`);
-         TimerManager.startActionTimerForPlayer(room, playerId, 'turn');
-        return false;
-    }
-    player.hand = handAfterAction;
+    let finalMeldTiles: Tile[];
+    let handAfterGang: Tile[];
 
-    if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile && room.gameState.lastDrawnTile.kind !== tileKindToGang) {
-        player.addTileToHand(room.gameState.lastDrawnTile);
-    }
-    else if (room.gameState.gamePhase === GamePhase.AWAITING_DISCARD && player.isDealer && room.gameState.turnNumber === 1 && room.gameState.lastDrawnTile && room.gameState.lastDrawnTile.kind !== tileKindToGang) {
-        player.addTileToHand(room.gameState.lastDrawnTile);
+    if (isDrawnTilePartOfGang) {
+        // 第四張是剛摸到的牌
+        const { handAfterAction, newMeldTiles: removedFromHand } = removeTilesFromHand(player.hand, tileKindToGang, 3);
+        if (!removedFromHand || removedFromHand.length !== 3) {
+             if(player.socketId) room.io.to(player.socketId).emit('gameError', `暗槓時內部錯誤：無法從手牌移除3張 ${tileKindToGang}。`);
+             TimerManager.startActionTimerForPlayer(room, playerId, 'turn');
+             return false;
+        }
+        finalMeldTiles = [...removedFromHand, room.gameState.lastDrawnTile!];
+        handAfterGang = handAfterAction;
+    } else {
+        // 四張牌都在手上 (例如 PLAYER_TURN_START 或 PLAYER_DRAWN 但摸到的不是槓牌)
+        const { handAfterAction, newMeldTiles: removedFromHand } = removeTilesFromHand(player.hand, tileKindToGang, 4);
+        if (!removedFromHand || removedFromHand.length !== 4) {
+             if(player.socketId) room.io.to(player.socketId).emit('gameError', `暗槓時內部錯誤：無法從手牌移除4張 ${tileKindToGang}。`);
+             TimerManager.startActionTimerForPlayer(room, playerId, 'turn');
+             return false;
+        }
+        finalMeldTiles = removedFromHand;
+        handAfterGang = handAfterAction;
     }
     
-    player.hand = sortHandVisually(player.hand);
+    player.hand = sortHandVisually(handAfterGang);
+    // 暗槓後，玩家會重新摸牌，所以清除 lastDrawnTile (無論之前是什麼)
     room.gameState.lastDrawnTile = null; 
 
     const anGangMeld: Meld = {
         id: `meld-${player.id}-${Date.now()}`,
         designation: MeldDesignation.GANGZI,
-        tiles: newMeldTiles.sort((a,b) => TILE_KIND_DETAILS[b.kind].orderValue - TILE_KIND_DETAILS[a.kind].orderValue), // 暗槓也按降序
+        tiles: finalMeldTiles.sort((a,b) => TILE_KIND_DETAILS[b.kind].orderValue - TILE_KIND_DETAILS[a.kind].orderValue),
         isOpen: false, 
     };
     player.melds.push(anGangMeld);
@@ -578,6 +610,7 @@ export const processDeclareAnGang = (room: GameRoom, playerId: number, tileKindT
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id, 'turn'); 
     room.broadcastGameState();
+    AIHandler.processAITurnIfNeeded(room); // 暗槓後輪到AI摸牌
     return true;
 };
 
@@ -621,6 +654,7 @@ export const processDeclareMingGangFromHand = (room: GameRoom, playerId: number,
     room.updateGameStatePlayers();
     TimerManager.startActionTimerForPlayer(room, player.id, 'turn'); 
     room.broadcastGameState();
+    AIHandler.processAITurnIfNeeded(room); // 加槓後輪到AI摸牌
     return true;
 };
 

@@ -24,7 +24,7 @@ const app = express();
 
 app.use(express.static(path.join(__dirname, '../../dist/')));
 
-app.all('/', (_req, res) => {res.sendFile(path.join(__dirname, '../../dist/index.html'))})
+app.get('/', (_req, res) => {res.sendFile(path.join(__dirname, '../../dist/index.html'))})
 
 // ✅ 包裝 HTTP server
 const httpServer = createServer(app);
