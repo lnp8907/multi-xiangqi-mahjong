@@ -37,8 +37,7 @@ export const calculateAndApplyScores = (room: GameRoom): void => {
             } 
             // 如果是自摸，則其他三家各扣除一定分數 (例如：baseScore / 3 或固定值)
             else if (room.gameState.winType === 'selfDrawn') {
-                // const scoreToDeduct = Math.ceil(baseScore / (room.players.length -1)); // 平均分配給其他玩家
-                const scoreToDeduct = Math.ceil(baseScore)
+                const scoreToDeduct = Math.ceil(baseScore / (room.players.length -1)); // 平均分配給其他玩家
                 room.players.forEach(player => {
                     if (player.id !== winner.id) {
                         player.score -= scoreToDeduct;

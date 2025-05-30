@@ -22,11 +22,11 @@ import path from 'path';
 // ✅ 新增 Express 應用
 const app = express();
 
-// app.use(express.static(path.join(__dirname, '../../dist/')));
+app.use(express.static(path.join(__dirname, '../../dist/')));
 
-// app.get('/', (_req, res) => { // Modified: Add types to _req and res
-//   res.sendFile(path.join(__dirname, '../../dist/index.html'));
-// });
+app.get('/', (_req, res) => { // Modified: Add types to _req and res
+  res.sendFile(path.join(__dirname, '../../dist/index.html'));
+});
 
 // ✅ 包裝 HTTP server
 const httpServer = createServer(app);

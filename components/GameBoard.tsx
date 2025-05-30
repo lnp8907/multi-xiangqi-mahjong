@@ -289,16 +289,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
       gameState.gamePhase === GamePhase.PLAYER_DRAWN &&
       humanPlayer?.id === gameState.currentPlayerIndex;
 
-    if (isMyTurnDrawnPhase) {
-      // 如果遊戲階段變為 PLAYER_DRAWN (表示摸牌成功)，則標記本回合已自動摸牌
+    if (isMyTurnStartPhase) {
+      // 如果是我的回合開始階段 (新回合或槓牌後)，重置摸牌標記
+      hasAutoDrawnThisTurnRef.current = false;
+    } else if (isMyTurnDrawnPhase) {
+      // 如果我已成功摸牌，設定標記
       hasAutoDrawnThisTurnRef.current = true;
-    } else if (!isMyTurnStartPhase) {
-      // 如果不再是「我的回合開始」階段 (例如輪到別人，或進入宣告階段)，則重置標記以備下個回合
+    } else {
+      // 如果不是我的回合開始，也不是我已摸牌的階段 (例如輪到別人，或進入宣告階段等)
+      // 則重置此標記，以便輪到我時可以正確自動摸牌。
       hasAutoDrawnThisTurnRef.current = false;
     }
-    // 注意：如果摸牌請求失敗，gamePhase 不會變為 PLAYER_DRAWN，
-    // hasAutoDrawnThisTurnRef.current 保持 false，
-    // 上一個 useEffect 在 isSubmitting 變為 false 後會再次嘗試摸牌。
   }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer?.id]);
   // --- 自動摸牌邏輯結束 ---
 
@@ -651,7 +652,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
             {/* 棄牌堆顯示 */}
             <div className="w-full flex flex-col items-center my-2">
-                <div className="h-[250px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
+                <div className="h-[166px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
                 {gameState.discardPile
                 .slice() // 創建副本以避免修改原陣列
                 .reverse() // 反轉順序，最新的棄牌顯示在最前面 (邏輯上) 或最後面 (視覺上，取決於 flex-wrap)
@@ -678,7 +679,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION || // 等待特定玩家宣告 (舊流程)
                   gameState.gamePhase === GamePhase.ACTION_PENDING_CHI_CHOICE // 正在選擇吃牌組合
                   ) && (
-                    <div className="mb-2 p-1 bg-yellow-600/30 rounded flex flex-col items-center">
+                    <div className="-mt-10 mb-2 p-1 bg-yellow-600/30 rounded flex flex-col items-center">
                         <span className="text-xs text-yellow-200 mb-0.5">最新棄牌 (待宣告):</span>
                         <TileDisplay tile={gameState.lastDiscardedTile} size="medium" isDiscarded isLatestDiscard={true} />
                     </div>
@@ -686,7 +687,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
             </div>
 
             {/* 操作按鈕區域 */}
-            <div className="flex flex-wrap gap-2 justify-center items-center mt-auto p-2 min-h-[50px]">
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex flex-wrap gap-2 justify-center items-center p-2 min-h-[50px] w-auto max-w-full">
                 {/* 打牌按鈕 (如果可以打牌) */}
                 {canHumanPlayerDiscard && (
                 <ActionButton label="打牌" onClick={handleDiscard} disabled={!selectedTileId || isSubmitting} variant="danger" />

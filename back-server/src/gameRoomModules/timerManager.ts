@@ -180,8 +180,6 @@ export const handleGlobalClaimTimeout = (room: GameRoom): void => {
  * @param {boolean} isOffline - 玩家是否已離線 (用於日誌和可能的不同處理)。
  */
 export const handlePlayerActionTimeout = (room: GameRoom, playerId: number, timerType: 'claim' | 'turn', isOffline: boolean): void => {
-    // 注意：此函數主要處理舊的單人宣告超時和玩家回合內行動超時。
-    // 全局宣告超時由 handleGlobalClaimTimeout 處理。
     clearActionTimer(room); 
     const player = room.players.find(p => p.id === playerId);
     if (!player) {
@@ -191,45 +189,61 @@ export const handlePlayerActionTimeout = (room: GameRoom, playerId: number, time
 
     room.addLog(`${player.name} (座位: ${player.id}) 行動超時${isOffline ? ' (因離線)' : ''}，類型: ${timerType}。`);
 
-    if (timerType === 'claim') { // 舊的單人宣告超時
+    if (timerType === 'claim') { 
         room.addLog(`${player.name} 的單獨宣告超時，自動跳過。`);
         PlayerActionHandler.processPassClaim(room, playerId); 
     } else if (timerType === 'turn') {
-        room.addLog(`${player.name} 回合行動超時，系統自動打牌。`);
-        let tileToDiscard: Tile | null = null;
+        room.addLog(`${player.name} 回合行動超時，系統自動處理。`);
 
-        const handForDiscardChoice = (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile)
-            ? [...player.hand, room.gameState.lastDrawnTile]
-            : player.hand;
-
-        if (isOffline || !player.isHuman) { 
-            tileToDiscard = room.aiService.chooseDiscardForTimeoutOrOffline(handForDiscardChoice, room.getGameState());
-            if (!tileToDiscard && handForDiscardChoice.length > 0) {
-                 tileToDiscard = handForDiscardChoice[handForDiscardChoice.length -1]; // 打最後一張
-                 room.addLog(`AI (${player.name}) 棄牌選擇異常，系統選擇最後一張牌 (${tileToDiscard?.kind}) 打出。`);
+        if (room.gameState.gamePhase === GamePhase.PLAYER_TURN_START) {
+            // 如果在 PLAYER_TURN_START 階段超時，表示玩家尚未摸牌，系統應為其摸牌。
+            room.addLog(`系統為 ${player.name} 自動摸牌。`);
+            const drawSuccess = PlayerActionHandler.processDrawTile(room, playerId);
+            // PlayerActionHandler.processDrawTile 內部會處理後續階段轉換和AI行動或為真人玩家啟動新的打牌計時器。
+            // 如果 processDrawTile 失敗 (例如牌堆已空導致流局)，它會處理遊戲結束流程。
+            if (!drawSuccess) {
+                 // 極端情況：如果摸牌不成功且遊戲未結束，記錄錯誤
+                console.error(`[TimerManager ${room.roomId}] 玩家 ${player.name} 在 PLAYER_TURN_START 超時後，自動摸牌失敗但遊戲未結束。`);
+                 room.addLog(`嚴重錯誤: ${player.name} 自動摸牌失敗。`);
+                 // 可以考慮是否需要進一步處理，例如強制流局
             }
-        } else { 
-            if (handForDiscardChoice.length > 0) {
-                tileToDiscard = handForDiscardChoice[handForDiscardChoice.length - 1]; // 打出手牌中的最後一張
-                room.addLog(`系統為 ${player.name} 自動選擇打出其手牌中最右邊的牌 (${tileToDiscard.kind})。`);
+        } else if (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN || room.gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
+            // 如果在 PLAYER_DRAWN 或 AWAITING_DISCARD 階段超時，表示玩家需要打牌。
+            room.addLog(`系統為 ${player.name} 自動打牌。`);
+            let tileToDiscard: Tile | null = null;
+
+            const handForDiscardChoice = (room.gameState.gamePhase === GamePhase.PLAYER_DRAWN && room.gameState.lastDrawnTile)
+                ? [...player.hand, room.gameState.lastDrawnTile]
+                : player.hand;
+
+            if (isOffline || !player.isHuman) { 
+                tileToDiscard = room.aiService.chooseDiscardForTimeoutOrOffline(handForDiscardChoice, room.getGameState());
+                if (!tileToDiscard && handForDiscardChoice.length > 0) {
+                     tileToDiscard = handForDiscardChoice[handForDiscardChoice.length -1]; 
+                     room.addLog(`AI (${player.name}) 棄牌選擇異常，系統選擇最後一張牌 (${tileToDiscard?.kind}) 打出。`);
+                }
+            } else { 
+                if (handForDiscardChoice.length > 0) {
+                    tileToDiscard = handForDiscardChoice[handForDiscardChoice.length - 1]; 
+                    room.addLog(`系統為 ${player.name} 自動選擇打出其手牌中最右邊的牌 (${tileToDiscard.kind})。`);
+                }
             }
-        }
-        
-        // 如果經過上述邏輯，仍然沒有選出棄牌（例如手牌為空，且 lastDrawnTile 也未被納入）
-        if (!tileToDiscard && room.gameState.lastDrawnTile && room.gameState.gamePhase === GamePhase.PLAYER_DRAWN) {
-             tileToDiscard = room.gameState.lastDrawnTile;
-             room.addLog(`系統為 ${player.name} 自動選擇打出剛摸到的牌 (${tileToDiscard.kind})，因無其他牌可選。`);
-        }
+            
+            if (!tileToDiscard && room.gameState.lastDrawnTile && room.gameState.gamePhase === GamePhase.PLAYER_DRAWN) {
+                 tileToDiscard = room.gameState.lastDrawnTile;
+                 room.addLog(`系統為 ${player.name} 自動選擇打出剛摸到的牌 (${tileToDiscard.kind})，因無其他牌可選。`);
+            }
 
-
-        if (tileToDiscard) {
-            PlayerActionHandler.processDiscardTile(room, playerId, tileToDiscard.id); 
+            if (tileToDiscard) {
+                PlayerActionHandler.processDiscardTile(room, playerId, tileToDiscard.id); 
+            } else {
+                console.error(`[TimerManager ${room.roomId}] 玩家 ${player.name} 回合超時，但無牌可打！手牌數: ${player.hand.length}, 剛摸的牌: ${room.gameState.lastDrawnTile?.kind}`);
+                room.addLog(`嚴重錯誤: ${player.name} 無牌可打，遊戲可能卡住。`);
+                room.gameState.isDrawGame = true; 
+                RoundHandler.handleRoundEndFlow(room); 
+            }
         } else {
-            console.error(`[TimerManager ${room.roomId}] 玩家 ${player.name} 回合超時，但無牌可打！手牌數: ${player.hand.length}, 剛摸的牌: ${room.gameState.lastDrawnTile?.kind}`);
-            room.addLog(`嚴重錯誤: ${player.name} 無牌可打，遊戲可能卡住。`);
-            room.gameState.isDrawGame = true; 
-            RoundHandler.handleRoundEndFlow(room); 
-            // room.broadcastGameState(); // handleRoundEndFlow會廣播
+            console.warn(`[TimerManager ${room.roomId}] 玩家 ${player.name} 的 'turn' 計時器在意外的階段 ${room.gameState.gamePhase} 超時。`);
         }
     }
 };
