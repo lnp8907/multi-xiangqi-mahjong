@@ -4,7 +4,7 @@ import { TileKind } from '../types';
 import { TAIWANESE_HOKKIEN_TILE_NAMES } from '../constants';
 
 // 預設動作音效的音量 (範圍 0.0 到 1.0)
-let actionSoundVolume = 0.7;
+let actionSoundVolume = 0.5; // MODIFIED: 預設音量調整為 0.5
 
 // --- 一般動作的音效定義 ---
 // "打牌" 和 "摸牌" 現在有特殊處理邏輯。
@@ -18,7 +18,7 @@ const soundMap: Record<string, string> = {
   "胡": "/audio/胡牌.mp3",       // 通用胡牌音效 (主要用於食胡)
   "自摸": "/audio/自摸.mp3",       // 自摸音效
   "天胡": "/audio/天胡.mp3",       // 天胡音效 (若無此檔案，會嘗試播放通用胡牌音效)
-  // "一炮多響": "/audio/一炮多響.mp3", // 新增：一炮多響的音效 (路徑預留)
+  "一炮多響": "/audio/一炮多響.mp3", // 新增：一炮多響的音效 (路徑預留)
   // "打牌": "/audio/discard.mp3", // 不再用於通用打牌音效，改用牌面音效
   // "摸牌": "/audio/draw.mp3",   // 不再用於摸牌音效 (摸牌通常無聲)
 };

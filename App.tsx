@@ -29,7 +29,6 @@ type GameView = 'home' | 'lobby' | 'game'; // 'home': 主頁, 'lobby': 大廳, '
 const env = (import.meta as any).env;
 // Socket.IO 伺服器的 URL，優先從環境變數讀取，若無則使用本地開發預設值
 // const SOCKET_SERVER_URL = env?.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
-const SOCKET_SERVER_URL = "";
 
 // 定義通知物件的結構
 interface AppNotification {
@@ -38,6 +37,11 @@ interface AppNotification {
   type: NotificationType;
   duration?: number;
 }
+
+// 背景音樂路徑
+const LOBBY_BGM_SRC = '/audio/bgm_lobby_calm.mp3';
+const GAME_ROOM_BGM_SRC = '/audio/bgm_gameroom.mp3';
+
 
 /**
  * @description App 組件是整個應用程式的根組件，負責管理整體狀態、視圖切換和 Socket 連接。
@@ -61,13 +65,16 @@ const App: React.FC = () => {
   const [attemptingToJoinRoomDetails, setAttemptingToJoinRoomDetails] = useState<RoomListData | null>(null);
 
   // --- 背景音樂相關狀態 ---
-  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(true);
   const [musicVolume, setMusicVolume] = useState(0.5);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [currentMusicSrc, setCurrentMusicSrc] = useState<string>(LOBBY_BGM_SRC);
+  // MODIFIED: 使用新的 ref 來追蹤遊戲音樂播放時的上下文，以判斷新場次的開始
+  const gameMusicContextRef = useRef<{ musicSrc: string | null; round: number | undefined }>({ musicSrc: null, round: undefined });
 
   // --- 遊戲音效相關狀態 ---
   const [isSoundEffectsEnabled, setIsSoundEffectsEnabled] = useState(true);
-  const [soundEffectsVolume, setSoundEffectsVolume] = useState(getActionSoundVolume());
+  const [soundEffectsVolume, setSoundEffectsVolume] = useState(0.5);
 
   // --- 其他狀態 ---
   const [isLoading, setIsLoading] = useState(false);
@@ -104,7 +111,7 @@ const App: React.FC = () => {
   const initializeWebRTC = useCallback(async (roomId: string, roomAllowsVoice: boolean) => {
     if (!roomAllowsVoice) {
       console.log(`[App.tsx] 房間 ${roomId} 已禁用遊戲語音，不初始化 WebRTC。`);
-      setIsVoiceChatSupported(false); // 雖然瀏覽器可能支持，但房間不允許
+      setIsVoiceChatSupported(false);
       return;
     }
     if (!socketRef.current) {
@@ -132,7 +139,7 @@ const App: React.FC = () => {
                 audioElement.srcObject = remoteStream;
                 audioElement.autoplay = true;
                 audioElementsRef.current[socketId] = audioElement;
-                document.body.appendChild(audioElement); // 考慮更合適的掛載點
+                document.body.appendChild(audioElement); 
                 console.log(`[App.tsx] 為 ${socketId} 創建並播放 Audio 元素。`);
             } else {
                  audioElementsRef.current[socketId].srcObject = remoteStream;
@@ -156,7 +163,6 @@ const App: React.FC = () => {
         manager.onPlayerMuted = (socketId, muted) => {
             setPlayerMutedStates(prev => ({ ...prev, [socketId]: muted }));
         };
-        // 新增：處理 WebRTC ICE 連接失敗的回調
         manager.onIceConnectionFailed = (failedPeerSocketId: string, failedPlayerId: number) => {
             console.log(`[App.tsx] WebRTC ICE connection failed for player ID ${failedPlayerId} (Socket: ${failedPeerSocketId}).`);
             const playerInGameState = currentGameState?.players.find(p => p.id === failedPlayerId);
@@ -182,7 +188,7 @@ const App: React.FC = () => {
         setIsVoiceChatSupported(false);
         setLocalAudioStream(null);
     }
-  }, [addNotification, isMicrophoneMuted, currentGameState]); // 將 currentGameState 加入依賴項以供 onIceConnectionFailed 使用
+  }, [addNotification, isMicrophoneMuted, currentGameState]);
 
   const cleanupWebRTC = useCallback(() => {
     if (webRTCManagerRef.current) {
@@ -207,7 +213,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (playerName && currentView !== 'home') {
       if (!socketRef.current) {
-        console.log(`[App.tsx] 嘗試連接到 Socket.IO 伺服器: ${SOCKET_SERVER_URL}，玩家名稱: ${playerName}`);
+        // console.log(`[App.tsx] 嘗試連接到 Socket.IO 伺服器: ${SOCKET_SERVER_URL}，玩家名稱: ${playerName}`);
         const newSocketInstance = io({
           query: { playerName },
           reconnectionAttempts: 3,
@@ -287,18 +293,16 @@ const App: React.FC = () => {
       setCurrentGameState(data.gameState);
       setCurrentView('game');
       setIsLoading(false);
-      // 檢查房間是否允許語音，然後初始化 WebRTC
       const roomAllowsVoice = data.gameState.voiceEnabled === undefined ? true : data.gameState.voiceEnabled;
       initializeWebRTC(data.roomId, roomAllowsVoice); 
     };
 
     const onGameStateUpdate = (updatedGameState: GameState) => {
         setCurrentGameState(prevGameState => {
-            if (!prevGameState && !updatedGameState) return null; // 如果兩者都為 null
-            if (!updatedGameState) return prevGameState; // 如果新狀態為 null，保留舊狀態 (理論上不應發生)
-            if (!prevGameState && updatedGameState) return updatedGameState; // 如果舊狀態為 null，直接用新狀態
+            if (!prevGameState && !updatedGameState) return null;
+            if (!updatedGameState) return prevGameState;
+            if (!prevGameState && updatedGameState) return updatedGameState;
 
-            // 確保 prevGameState.players 存在
             const basePlayers = prevGameState?.players || updatedGameState.players || [];
 
             const newPlayersArray = updatedGameState.players.map(updPlayer => {
@@ -336,7 +340,7 @@ const App: React.FC = () => {
     };
 
     const handleVoiceSignal = (data: { fromSocketId: string; signal: any }) => {
-        if(currentGameState?.voiceEnabled === false) return; // 如果房間禁用遊戲語音，忽略信令
+        if(currentGameState?.voiceEnabled === false) return;
         webRTCManagerRef.current?.handleIncomingSignal(data.fromSocketId, data.signal);
     };
     const handleVoiceChatUserList = (data: { users: VoiceChatUser[] }) => {
@@ -409,25 +413,77 @@ const App: React.FC = () => {
 
 
   // --- 副作用處理 (useEffect) ---
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = musicVolume;
-      if (isMusicPlaying) {
-        audioRef.current.play().catch(error => console.warn("[App.tsx] 背景音樂自動播放失敗:", error));
-      } else {
-        audioRef.current.pause();
-      }
-    }
-  }, [isMusicPlaying, musicVolume]);
 
+  // MODIFIED: 管理 currentMusicSrc 狀態
+  useEffect(() => {
+    if (currentView === 'lobby') {
+      if (currentMusicSrc !== LOBBY_BGM_SRC) setCurrentMusicSrc(LOBBY_BGM_SRC);
+    } else if (currentView === 'game') {
+      if (currentMusicSrc !== GAME_ROOM_BGM_SRC) setCurrentMusicSrc(GAME_ROOM_BGM_SRC);
+    }
+  }, [currentView, setCurrentMusicSrc]); // 依賴 currentView 和 setCurrentMusicSrc
+
+
+  // MODIFIED: 背景音樂播放邏輯，並在新「場次」開始時重播
+  useEffect(() => {
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+
+    let shouldRestartMusic = false;
+
+    // 1. 如果 currentMusicSrc 已更新，則設定 audio 元素的 src 並載入
+    if (audioEl.src !== currentMusicSrc && currentMusicSrc) {
+        audioEl.src = currentMusicSrc;
+        audioEl.load();
+        console.log(`[App.tsx] BGM 音源更新為: ${currentMusicSrc}`);
+        
+        // 如果新的音源是遊戲房間音樂，且當前是第一局，則標記重置 (新場次開始)
+        if (currentMusicSrc === GAME_ROOM_BGM_SRC && currentGameState?.currentRound === 1) {
+            shouldRestartMusic = true;
+            console.log(`[App.tsx] 切換至遊戲 BGM 且為第一局，標記音樂重置。`);
+        }
+        // 更新音樂上下文參考
+        gameMusicContextRef.current = { musicSrc: currentMusicSrc, round: currentGameState?.currentRound };
+    }
+    // 2. 如果音源未變，但仍是遊戲房間音樂，檢查是否因再戰等原因開始了新場次 (局號從非1變為1)
+    else if (currentMusicSrc === GAME_ROOM_BGM_SRC && currentView === 'game') {
+        if (currentGameState?.currentRound === 1 && gameMusicContextRef.current.round !== 1) {
+            shouldRestartMusic = true;
+            console.log(`[App.tsx] 偵測到新場次開始 (局號從 ${gameMusicContextRef.current.round} 到 1)，標記音樂重置。`);
+        }
+        // 如果局號有變，則更新音樂上下文參考
+        if (currentGameState?.currentRound !== gameMusicContextRef.current.round) {
+             gameMusicContextRef.current = { musicSrc: currentMusicSrc, round: currentGameState?.currentRound };
+        }
+    }
+
+
+    // 如果標記了需要重置音樂
+    if (shouldRestartMusic) {
+        audioEl.currentTime = 0;
+        console.log(`[App.tsx] 遊戲房間音樂已重置至開頭。`);
+    }
+
+    // 控制播放/暫停和音量
+    audioEl.volume = musicVolume;
+    if (isMusicPlaying && audioEl.src) {
+        audioEl.play().catch(error => console.warn(`[App.tsx] BGM (${audioEl.src || '未知'}) 播放失敗:`, error.message));
+    } else {
+        audioEl.pause();
+    }
+
+  }, [currentMusicSrc, isMusicPlaying, musicVolume, currentGameState?.currentRound, currentView]);
+
+
+  // 初始化音效音量
   useEffect(() => {
     setActionSoundVolume(isSoundEffectsEnabled ? soundEffectsVolume : 0);
   }, [isSoundEffectsEnabled, soundEffectsVolume]);
 
     useEffect(() => {
-        if (currentGameState && currentGameState.players) { // 確保 currentGameState 和 players 存在
+        if (currentGameState && currentGameState.players) {
             setCurrentGameState(prevGameState => {
-                if (!prevGameState || !prevGameState.players) return prevGameState; // 再次檢查 prevGameState
+                if (!prevGameState || !prevGameState.players) return prevGameState;
                 const updatedPlayers = prevGameState.players.map(player => {
                     const playerSocketId = player.socketId || player.id.toString();
                     const speaking = playerSpeakingStates[playerSocketId] ?? player.isSpeaking ?? false;
@@ -439,7 +495,6 @@ const App: React.FC = () => {
                     }
                     return player;
                 });
-                // 只有在 players 實際發生變化時才更新 state，避免不必要的重渲染
                 if (JSON.stringify(prevGameState.players) !== JSON.stringify(updatedPlayers)) {
                     return { ...prevGameState, players: updatedPlayers };
                 }
@@ -501,8 +556,7 @@ const App: React.FC = () => {
 
     const roomCreationDataWithPlayerName = {
         ...settingsFromModal,
-        playerName: playerName, // playerName 由 App.tsx 維護
-        // voiceEnabled 已經包含在 settingsFromModal 中
+        playerName: playerName,
     };
 
     socketRef.current.emit('lobbyCreateRoom', roomCreationDataWithPlayerName, (ack) => {
@@ -620,7 +674,7 @@ const App: React.FC = () => {
               fillWithAI: currentGameState.configuredFillWithAI,
               hostName: currentGameState.hostPlayerName,
               numberOfRounds: currentGameState.numberOfRounds,
-              voiceEnabled: currentGameState.voiceEnabled === undefined ? true : currentGameState.voiceEnabled, // 確保 voiceEnabled 傳遞
+              voiceEnabled: currentGameState.voiceEnabled === undefined ? true : currentGameState.voiceEnabled,
             }}
             initialGameState={currentGameState}
             clientPlayerId={clientPlayerIdRef.current} 
@@ -647,7 +701,7 @@ const App: React.FC = () => {
   // --- 主 JSX 結構 ---
   return (
     <>
-      <audio ref={audioRef} src="/audio/bgm_lobby_calm.mp3" loop />
+      <audio ref={audioRef} loop />
 
       <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-gray-900 text-slate-100">
         {renderView()}
