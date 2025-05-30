@@ -1,6 +1,7 @@
+
 // 引入類型和常數
 import { GameRoom } from '../GameRoom';
-import { GamePhase } from '../types';
+import { GamePhase, Player } from '../types'; // 新增 Player
 import { NUM_PLAYERS, LOBBY_ROOM_NAME, REMATCH_VOTE_TIMEOUT_SECONDS } from '../constants';
 import * as TurnHandler from './turnHandler';
 import * as RoundHandler from './roundHandler';
@@ -91,27 +92,34 @@ export const handleRematchVoteTimeout = (room: GameRoom, isEarlyStart: boolean):
     if (onlineHumanPlayers.length > 0 && agreedHumanPlayers.length === onlineHumanPlayers.length) {
         room.addLog("所有在線真人玩家同意再戰！準備開始新的一場比賽。");
 
-        room.players = agreedHumanPlayers; // 只保留同意再戰的真人玩家
-        // 重新指派房主
+        // 1. 保存所有當前玩家 (包括AI) 的分數
+        const allCurrentPlayersScores: Record<number, { score: number, name: string, isAI: boolean }> = {};
+        room.players.forEach(p => {
+            allCurrentPlayersScores[p.id] = { score: p.score, name: p.name, isAI: !p.isHuman };
+            console.info(`[MatchHandler ${room.roomId}] 再戰前，保存玩家 ${p.name} (ID: ${p.id}, AI: ${!p.isHuman}) 分數: ${p.score}`);
+        });
+
+
+        // 2. 只保留同意再戰的真人玩家，並重新指派房主
+        room.players = agreedHumanPlayers; 
         const originalHostAgreed = agreedHumanPlayers.find(p => p.socketId === room.roomSettings.hostSocketId);
         if (originalHostAgreed) {
             room.players.forEach(p => p.isHost = (p.id === originalHostAgreed.id));
             room.roomSettings.hostName = originalHostAgreed.name;
-            // hostSocketId 保持不變
-        } else if (agreedHumanPlayers.length > 0) { // 如果原房主未同意，則指派第一個同意的玩家為新房主
+        } else if (agreedHumanPlayers.length > 0) { 
             agreedHumanPlayers[0].isHost = true;
             room.roomSettings.hostName = agreedHumanPlayers[0].name;
             room.roomSettings.hostSocketId = agreedHumanPlayers[0].socketId!;
             agreedHumanPlayers.slice(1).forEach(p => p.isHost = false);
         }
         room.gameState.hostPlayerName = room.roomSettings.hostName;
-         room.players.forEach(p => { // 確保 isHost 狀態正確
+        room.players.forEach(p => { 
             if (p.socketId === room.roomSettings.hostSocketId) p.isHost = true;
             else p.isHost = false;
         });
 
-
-        room.initializeAIPlayers(); // 重新填充AI以達到 NUM_PLAYERS
+        // 3. 重新填充AI以達到 NUM_PLAYERS
+        room.initializeAIPlayers(); 
 
         if (room.players.length < NUM_PLAYERS) {
              room.addLog(`同意再戰的玩家加上AI後人數不足 ${NUM_PLAYERS}。比賽無法開始，房間關閉。`);
@@ -122,7 +130,23 @@ export const handleRematchVoteTimeout = (room: GameRoom, isEarlyStart: boolean):
              return;
         }
 
-        RoundHandler.startGameRound(room, true); // isNewMatch = true
+        // 4. 開始新一場比賽 (isNewMatch = true 會重置牌局、隨機莊家)
+        // RoundHandler.initializeOrResetGameForRound 中已修正 isNewMatch 不重置分數
+        RoundHandler.startGameRound(room, true); 
+
+        // 5. 恢復先前保存的分數 (包括 AI)
+        room.players.forEach(playerInNewMatch => {
+            if (allCurrentPlayersScores[playerInNewMatch.id] !== undefined) {
+                playerInNewMatch.score = allCurrentPlayersScores[playerInNewMatch.id].score;
+                console.info(`[MatchHandler ${room.roomId}] 恢復玩家 ${playerInNewMatch.name} (ID: ${playerInNewMatch.id}, AI: ${!playerInNewMatch.isHuman}) 的分數為: ${playerInNewMatch.score}`);
+            } else {
+                 console.info(`[MatchHandler ${room.roomId}] 未找到玩家 ${playerInNewMatch.name} (ID: ${playerInNewMatch.id}) 的保留分數。分數保持為 ${playerInNewMatch.score}。這可能是新加入的AI。`);
+            }
+        });
+        room.updateGameStatePlayers(); // 確保 gameState 中的玩家分數也更新
+        room.broadcastGameState(); // 廣播包含已恢復分數的狀態
+        room.addLog("玩家分數已延續到新的一場比賽。");
+
     } else {
         room.addLog("並非所有在線真人玩家都同意再戰，或無人同意。比賽結束，房間關閉。");
         onlineHumanPlayers.forEach(p => {
@@ -145,6 +169,3 @@ export const handleRematchVoteTimeout = (room: GameRoom, isEarlyStart: boolean):
         room.requestClosure();
     }
 };
-
-
-// clearRematchTimer 函數已移至 timerManager.ts

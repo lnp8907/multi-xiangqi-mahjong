@@ -90,6 +90,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [availableClaimsForClient, setAvailableClaimsForClient] = useState<Claim[] | null>(null);
   const [localChiOptionsForClient, setLocalChiOptionsForClient] = useState<Tile[][] | null>(null);
   const hasAutoDrawnThisTurnRef = useRef(false);
+  const [showFinalMatchResultsModalStep, setShowFinalMatchResultsModalStep] = useState<'roundResult' | 'finalScore'>('roundResult');
 
 
   // --- 副作用 (useEffect) ---
@@ -99,24 +100,26 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setActionAnnouncements([]);
     setAvailableClaimsForClient(null);
     setLocalChiOptionsForClient(null);
-    // isSubmitting 應在動作完成後或超時後重置，此處不重置
-    // hasAutoDrawnThisTurnRef 應在回合開始時或狀態改變時重置
     hasAutoDrawnThisTurnRef.current = false;
+    setShowFinalMatchResultsModalStep('roundResult'); // 新增：重置終局顯示步驟
     console.log(`[GameBoard] Initial game state updated for room ${initialGameState.roomId}, round ${initialGameState.currentRound}.`);
-  }, [initialGameState.roomId, initialGameState.currentRound]); // 確保只在這些關鍵 ID 改變時重置
+  }, [initialGameState.roomId, initialGameState.currentRound]); 
 
   useEffect(() => {
     const handleGameStateUpdate = (newGameState: GameState) => {
       setGameState(newGameState);
-      // 如果不是等待宣告回應的階段，則清除客戶端的宣告選項
       if (newGameState.gamePhase !== GamePhase.AWAITING_ALL_CLAIMS_RESPONSE) {
         setAvailableClaimsForClient(null);
         setLocalChiOptionsForClient(null);
-        setIsSelectingChiCombo(false); // 確保關閉吃牌選擇
+        setIsSelectingChiCombo(false); 
       }
-      // 如果正在選擇吃牌組合，但遊戲階段已改變，則取消選擇
       if (isSelectingChiCombo && newGameState.gamePhase !== GamePhase.AWAITING_ALL_CLAIMS_RESPONSE) {
           setIsSelectingChiCombo(false);
+      }
+       // 如果遊戲從非 AWAITING_REMATCH_VOTES 階段進入此階段，重置步驟
+      if (newGameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES && newGameState.matchOver &&
+          gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES) {
+          setShowFinalMatchResultsModalStep('roundResult');
       }
     };
 
@@ -125,8 +128,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     };
 
     const handleActionAnnouncement = (announcementFromServer: ServerActionAnnouncementData) => {
-       // 計算玩家在客戶端 UI 上的相對位置
-       const numPlayers = NUM_PLAYERS; // 確保使用正確的玩家數量
+       const numPlayers = NUM_PLAYERS; 
        const offset = (announcementFromServer.playerId - clientPlayerId + numPlayers) % numPlayers;
        let uiPosition: 'top' | 'bottom' | 'left' | 'right';
 
@@ -136,8 +138,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
            case 2: uiPosition = 'top'; break;
            case 3: uiPosition = 'left'; break;
            default:
-             // 預設或錯誤處理
-             uiPosition = 'bottom'; // 或其他合理的預設值
+             uiPosition = 'bottom'; 
              console.warn(`[GameBoard] 計算動作宣告的 offset 時發生錯誤: ${offset}。伺服器玩家ID: ${announcementFromServer.playerId}, 客戶端玩家ID: ${clientPlayerId}。預設為 'bottom'。`);
              break;
        }
@@ -145,38 +146,27 @@ const GameBoard: React.FC<GameBoardProps> = ({
        const clientSideAnnouncement: ActionAnnouncement = {
            id: announcementFromServer.id,
            text: announcementFromServer.text,
-           playerId: announcementFromServer.playerId, // 保留伺服器端ID用於可能的邏輯
-           position: uiPosition, // 使用計算出的客戶端相對位置
+           playerId: announcementFromServer.playerId, 
+           position: uiPosition, 
            isMultiHuTarget: announcementFromServer.isMultiHuTarget,
        };
 
        setActionAnnouncements(prev => [...prev, clientSideAnnouncement]);
-
-       // --- 音效播放邏輯 ---
        let soundActionText = clientSideAnnouncement.text;
        let tileKindForSound: TileKind | undefined = undefined;
-
-       // 檢查宣告文字是否為牌面本身 (例如 "將", "兵")
        const isTileKind = TILE_KIND_ENUM_VALUES.some(kind => kind === clientSideAnnouncement.text);
        if (isTileKind) {
-           soundActionText = "打牌"; // 將動作歸類為 "打牌"
-           tileKindForSound = clientSideAnnouncement.text as TileKind; // 記錄牌面
+           soundActionText = "打牌"; 
+           tileKindForSound = clientSideAnnouncement.text as TileKind; 
        }
-
-       // 特定動作的音效
        const specialActionsForSound = ["碰", "吃", "槓", "明槓", "暗槓", "加槓", "胡", "自摸", "天胡", "一炮多響"];
        if (specialActionsForSound.includes(soundActionText) || soundActionText === "打牌") {
          playActionSound(soundActionText, tileKindForSound);
        }
-
-       // 一炮多響的特殊音效
        const isHuAction = ["胡", "自摸", "天胡"].includes(clientSideAnnouncement.text);
        if (isHuAction && clientSideAnnouncement.isMultiHuTarget) {
-           playActionSound("一炮多響"); // 假設有 "一炮多響.mp3" 或在 soundMap 中有對應
+           playActionSound("一炮多響"); 
        }
-       // --- 音效播放邏輯結束 ---
-
-       // 自動移除宣告動畫
        const animationDuration = (isHuAction && clientSideAnnouncement.isMultiHuTarget) ? 3000 : 2500;
        setTimeout(() => {
             setActionAnnouncements(prevMsgs => prevMsgs.filter(m => m.id !== clientSideAnnouncement.id));
@@ -187,58 +177,50 @@ const GameBoard: React.FC<GameBoardProps> = ({
         console.log(`[GameBoard] Received availableClaimsNotification for client ${clientPlayerId}:`, data);
         const clientSpecificClaims = data.claims.filter(claim => claim.playerId === clientPlayerId);
         setAvailableClaimsForClient(clientSpecificClaims.length > 0 ? clientSpecificClaims : null);
-
-        // 如果有吃牌宣告，且伺服器提供了吃牌選項，則設定
         if (clientSpecificClaims.some(c => c.action === 'Chi') && data.chiOptions) {
             setLocalChiOptionsForClient(data.chiOptions);
         } else {
-            setLocalChiOptionsForClient(null); // 否則清空
+            setLocalChiOptionsForClient(null); 
         }
     };
 
     socket.on('gameStateUpdate', handleGameStateUpdate);
     socket.on('gameChatMessage', handleGameChatMessage);
-    socket.on('actionAnnouncement', handleActionAnnouncement as (data: any) => void); // 修正類型斷言
+    socket.on('actionAnnouncement', handleActionAnnouncement as (data: any) => void); 
     socket.on('availableClaimsNotification', handleAvailableClaimsNotification);
 
     return () => {
       socket.off('gameStateUpdate', handleGameStateUpdate);
       socket.off('gameChatMessage', handleGameChatMessage);
-      socket.off('actionAnnouncement', handleActionAnnouncement as (data: any) => void); // 修正類型斷言
+      socket.off('actionAnnouncement', handleActionAnnouncement as (data: any) => void); 
       socket.off('availableClaimsNotification', handleAvailableClaimsNotification);
     };
-  }, [socket, TILE_KIND_ENUM_VALUES, clientPlayerId, isSelectingChiCombo]); // 添加 TILE_KIND_ENUM_VALUES 和 isSelectingChiCombo 到依賴項
+  }, [socket, TILE_KIND_ENUM_VALUES, clientPlayerId, isSelectingChiCombo, gameState.gamePhase]); // gameState.gamePhase 加入依賴項
 
   const humanPlayer = gameState.players.find(p => p.id === clientPlayerId && p.isHuman);
   const currentPlayer = gameState.players.length > 0 ? gameState.players[gameState.currentPlayerIndex] : null;
-  // const playerMakingDecision = gameState.playerMakingClaimDecision !== null ? gameState.players.find(p => p.id === gameState.playerMakingClaimDecision) : null; // 此變數可能不再主要使用
   const isHumanHost = humanPlayer?.isHost;
 
-  // 自動選中摸到的牌
   useEffect(() => {
     const currentLDT = gameState.lastDrawnTile;
     const previousLDT = prevLastDrawnTileRef.current;
     const humanPlayerIsCurrent = humanPlayer && currentPlayer?.id === humanPlayer.id;
-    // 檢查是否為莊家初始回合的特殊打牌階段
     const isDealerInitialTurn = currentPlayer?.isDealer &&
                                 gameState.turnNumber === 1 &&
-                                gameState.players.length > 0 && // 確保 players 陣列已填充
+                                gameState.players.length > 0 && 
                                 currentPlayer.id === gameState.players[gameState.dealerIndex].id;
-
-    // 條件：是玩家回合且摸了牌，或者莊家開局等待打牌
     const shouldConsiderAutoSelect = currentLDT && humanPlayerIsCurrent &&
-      ( gameState.gamePhase === GamePhase.PLAYER_DRAWN || // 玩家已摸牌
-        (gameState.gamePhase === GamePhase.AWAITING_DISCARD && isDealerInitialTurn) ); // 莊家開局打牌前
+      ( gameState.gamePhase === GamePhase.PLAYER_DRAWN || 
+        (gameState.gamePhase === GamePhase.AWAITING_DISCARD && isDealerInitialTurn) ); 
 
     if (shouldConsiderAutoSelect) {
-      // 只有當摸到的牌發生顯著變化時才自動選擇 (例如，從無到有，或者ID不同)
       const ldtHasChangedSignificantly = (!previousLDT && currentLDT) || (previousLDT && currentLDT && previousLDT.id !== currentLDT.id);
       if (ldtHasChangedSignificantly) {
-         setSelectedTileId(currentLDT!.id); // 自動選中摸到的牌
+         setSelectedTileId(currentLDT!.id); 
       }
     }
-    prevLastDrawnTileRef.current = currentLDT; // 更新上一張摸到的牌的 ref
-  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.lastDrawnTile, gameState.turnNumber, selectedTileId, gameState.dealerIndex, gameState.players]); // 添加 gameState.players 到依賴
+    prevLastDrawnTileRef.current = currentLDT; 
+  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.lastDrawnTile, gameState.turnNumber, selectedTileId, gameState.dealerIndex, gameState.players]); 
 
   const emitPlayerAction = useCallback((action: GameActionPayload) => {
     if (!gameState.roomId) {
@@ -246,72 +228,80 @@ const GameBoard: React.FC<GameBoardProps> = ({
         addNotification("發生錯誤：房間 ID 未設定，無法執行動作。", 'error');
         return;
     }
-    setIsSubmitting(true); // 設定為正在提交，禁用按鈕
+    setIsSubmitting(true); 
     socket.emit('gamePlayerAction', gameState.roomId, action);
-    // 清理客戶端狀態 (例如，如果打牌，則取消選中)
     if (action.type === 'DISCARD_TILE') setSelectedTileId(null);
     if (action.type === 'SUBMIT_CLAIM_DECISION') {
-      setAvailableClaimsForClient(null); // 清除可宣告選項
-      setIsSelectingChiCombo(false);     // 關閉吃牌選擇
+      setAvailableClaimsForClient(null); 
+      setIsSelectingChiCombo(false);     
     }
-    // 0.5秒後解除提交鎖定
     setTimeout(() => setIsSubmitting(false), 500);
   }, [socket, gameState.roomId, addNotification]);
 
-
   // --- 自動摸牌邏輯 ---
   useEffect(() => {
-    // 條件：輪到真人玩家，是回合開始階段，且本回合尚未自動摸牌
     const shouldAutoDraw =
       gameState.gamePhase === GamePhase.PLAYER_TURN_START &&
       humanPlayer &&
       humanPlayer.isOnline &&
       gameState.currentPlayerIndex === humanPlayer.id &&
-      !hasAutoDrawnThisTurnRef.current && // 檢查本回合是否已自動摸過牌
-      !isSubmitting; // 檢查是否正在提交其他動作
+      !hasAutoDrawnThisTurnRef.current &&
+      !isSubmitting;
 
     if (shouldAutoDraw) {
-      console.log(`[GameBoard] 為 ${humanPlayer.name} (座位: ${humanPlayer.id}) 自動摸牌。`);
-      // 注意：在發送 DRAW_TILE 之前 *不* 設定 hasAutoDrawnThisTurnRef.current = true
-      // hasAutoDrawnThisTurnRef.current 的設定將移至 gameStateUpdate 的副作用中，
-      // 當確認遊戲階段已變為 PLAYER_DRAWN 時才設定。
-      emitPlayerAction({ type: 'DRAW_TILE' });
+      const timerId = setTimeout(() => {
+        // 在延遲後再次檢查條件，以防狀態快速變化
+        if (
+          gameState.gamePhase === GamePhase.PLAYER_TURN_START &&
+          humanPlayer &&
+          humanPlayer.isOnline &&
+          gameState.currentPlayerIndex === humanPlayer.id &&
+          !hasAutoDrawnThisTurnRef.current && // 再次檢查
+          !isSubmitting // 再次檢查
+        ) {
+          console.log(`[GameBoard] 為 ${humanPlayer.name} (座位: ${humanPlayer.id}) 自動摸牌 (延遲後)。`);
+          emitPlayerAction({ type: 'DRAW_TILE' });
+        }
+      }, 150); // 150ms 延遲
+
+      return () => clearTimeout(timerId); // 清理計時器
     }
-  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer, emitPlayerAction, isSubmitting, hasAutoDrawnThisTurnRef]);
+  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer, emitPlayerAction, isSubmitting]);
 
-
-  // 監控遊戲狀態，以確定 hasAutoDrawnThisTurnRef 的狀態
+  // 根據遊戲階段管理 hasAutoDrawnThisTurnRef
   useEffect(() => {
-    const isMyTurnStartPhase =
-      gameState.gamePhase === GamePhase.PLAYER_TURN_START &&
-      humanPlayer?.id === gameState.currentPlayerIndex;
-    const isMyTurnDrawnPhase =
-      gameState.gamePhase === GamePhase.PLAYER_DRAWN &&
+    const isMyTurnAndPhase = (phase: GamePhase) =>
+      gameState.gamePhase === phase &&
       humanPlayer?.id === gameState.currentPlayerIndex;
 
-    if (isMyTurnStartPhase) {
-      // 如果是我的回合開始階段 (新回合或槓牌後)，重置摸牌標記
-      hasAutoDrawnThisTurnRef.current = false;
-    } else if (isMyTurnDrawnPhase) {
-      // 如果我已成功摸牌，設定標記
-      hasAutoDrawnThisTurnRef.current = true;
+    if (isMyTurnAndPhase(GamePhase.PLAYER_TURN_START)) {
+      if (hasAutoDrawnThisTurnRef.current) {
+        hasAutoDrawnThisTurnRef.current = false;
+        console.log(`[GameBoard] 重置 hasAutoDrawnThisTurnRef for ${humanPlayer?.name} (PLAYER_TURN_START)`);
+      }
+    } else if (isMyTurnAndPhase(GamePhase.PLAYER_DRAWN)) {
+      if (!hasAutoDrawnThisTurnRef.current) {
+        hasAutoDrawnThisTurnRef.current = true;
+        console.log(`[GameBoard] 設定 hasAutoDrawnThisTurnRef for ${humanPlayer?.name} (PLAYER_DRAWN)`);
+      }
     } else {
-      // 如果不是我的回合開始，也不是我已摸牌的階段 (例如輪到別人，或進入宣告階段等)
-      // 則重置此標記，以便輪到我時可以正確自動摸牌。
-      hasAutoDrawnThisTurnRef.current = false;
+      // 如果不是我的回合開始，也不是我已摸牌的階段，重置標記
+      if (hasAutoDrawnThisTurnRef.current) {
+        hasAutoDrawnThisTurnRef.current = false;
+        console.log(`[GameBoard] 重置 hasAutoDrawnThisTurnRef for ${humanPlayer?.name || 'player'} (非我的摸牌或已摸牌階段)`);
+      }
     }
-  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer?.id]);
+  }, [gameState.gamePhase, gameState.currentPlayerIndex, humanPlayer]);
   // --- 自動摸牌邏輯結束 ---
 
 
   const handleTileClick = useCallback((tile: Tile) => {
     if (humanPlayer && currentPlayer?.id === humanPlayer.id && gameState.players.find(p => p.id === humanPlayer.id)?.isHuman) {
-        // 只有在玩家已摸牌或等待出牌的階段才能選擇手牌
         if (gameState.gamePhase === GamePhase.PLAYER_DRAWN || gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
             setSelectedTileId(currentSelectedId => (currentSelectedId === tile.id ? null : tile.id));
         }
     }
-  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.players]); // 添加 gameState.players 到依賴
+  }, [humanPlayer, currentPlayer, gameState.gamePhase, gameState.players]); 
 
   const handleDiscard = () => {
     if (selectedTileId) {
@@ -319,25 +309,23 @@ const GameBoard: React.FC<GameBoardProps> = ({
     }
   };
 
-  // 處理玩家提交 "跳過" 宣告
   const handlePassClaimDecision = () => {
-    if (!humanPlayer) return; // 確保 humanPlayer 存在
+    if (!humanPlayer) return; 
     emitPlayerAction({
         type: 'SUBMIT_CLAIM_DECISION',
         decision: {
-            playerId: clientPlayerId!, // 確保 clientPlayerId 已定義
+            playerId: clientPlayerId!, 
             action: 'Pass'
         }
     });
   };
 
-  // 處理玩家選擇吃牌組合
   const handleChiSelect = (chiOption: Tile[]) => {
-    if (gameState.lastDiscardedTile && humanPlayer) { // 確保 humanPlayer 存在
+    if (gameState.lastDiscardedTile && humanPlayer) { 
       emitPlayerAction({
         type: 'SUBMIT_CLAIM_DECISION',
         decision: {
-          playerId: clientPlayerId!, // 確保 clientPlayerId 已定義
+          playerId: clientPlayerId!, 
           action: 'Chi',
           chiCombination: chiOption
         }
@@ -345,80 +333,61 @@ const GameBoard: React.FC<GameBoardProps> = ({
     }
   };
 
-  // 發送遊戲內聊天訊息
   const handleSendChatMessage = (messageText: string) => {
-    if (!humanPlayer || !gameState.roomId) return; // 確保 humanPlayer 和 roomId 存在
+    if (!humanPlayer || !gameState.roomId) return; 
     socket.emit('gameSendChatMessage', gameState.roomId, messageText);
   };
 
-  // 房主從等待房間模態框開始遊戲
   const handleStartGameFromModal = () => {
     if (isHumanHost && gameState.roomId) {
-      setIsSubmitting(true); // 開始提交
+      setIsSubmitting(true); 
       socket.emit('gameRequestStart', gameState.roomId);
-      setTimeout(() => setIsSubmitting(false), 1000); // 1秒後解除鎖定
+      setTimeout(() => setIsSubmitting(false), 1000); 
     }
   };
 
-  // 玩家確認下一局
   const handleConfirmNextRound = () => {
-    if (humanPlayer && gameState.roomId) { // 確保 humanPlayer 和 roomId 存在
+    if (humanPlayer && gameState.roomId) { 
         emitPlayerAction({ type: 'PLAYER_CONFIRM_NEXT_ROUND', playerId: humanPlayer.id });
     }
   };
 
-  // 玩家投票再戰
   const handleVoteRematch = () => {
-    if (humanPlayer && gameState.roomId) { // 確保 humanPlayer 和 roomId 存在
+    if (humanPlayer && gameState.roomId) { 
         emitPlayerAction({type: 'PLAYER_VOTE_REMATCH', vote: 'yes'});
     }
   };
 
-  // 渲染單個玩家的顯示區域
   const renderPlayer = (playerDisplayPosition: 'bottom' | 'left' | 'top' | 'right') => {
     if (gameState.players.length === 0) {
-      // 若 gameState.players 為空，顯示等待訊息
       return <div className={`p-2 rounded-lg shadow-inner bg-slate-700/30 min-h-[100px] w-full flex items-center justify-center text-slate-500 text-xs`}>等待玩家資料...</div>;
     }
-
     let displayPlayerIndex = -1;
-    // 確保使用正確的玩家數量進行模運算
     const numGamePlayers = gameState.players.length >= NUM_PLAYERS ? gameState.players.length : NUM_PLAYERS;
-
     if (clientPlayerId === null || numGamePlayers === 0) return <div className="p-2">等待玩家資訊...</div>;
-
-    // 根據客戶端玩家ID和顯示位置計算目標玩家的索引
     switch (playerDisplayPosition) {
         case 'bottom': displayPlayerIndex = clientPlayerId; break;
         case 'right': displayPlayerIndex = (clientPlayerId + 1) % numGamePlayers; break;
         case 'top': displayPlayerIndex = (clientPlayerId + 2) % numGamePlayers; break;
         case 'left': displayPlayerIndex = (clientPlayerId + 3) % numGamePlayers; break;
     }
-
-    // 檢查計算出的索引是否有效
     if (displayPlayerIndex < 0 || displayPlayerIndex >= gameState.players.length) {
-       // 如果索引無效 (例如，玩家列表尚未完全填充或 clientPlayerId 異常)，顯示空位或錯誤提示
        return <div className={`p-2 rounded-lg shadow-inner bg-slate-700/30 min-h-[100px] w-full flex items-center justify-center text-slate-500 text-xs`}>玩家席位 (空位或錯誤 ID: {displayPlayerIndex})</div>;
     }
-
     const targetPlayerToDisplay = gameState.players[displayPlayerIndex];
-
-    // 再次確認 targetPlayerToDisplay 是否存在
     if (!targetPlayerToDisplay) {
          return <div className={`p-2 rounded-lg shadow-inner bg-slate-700/30 min-h-[100px] w-full flex items-center justify-center text-slate-500 text-xs`}>玩家席位 (錯誤)</div>;
     }
-
     return (
       <PlayerDisplay
         player={targetPlayerToDisplay}
         isCurrentPlayer={
-            targetPlayerToDisplay.id === currentPlayer?.id || // 是否為當前回合玩家
-            // 或者，在等待宣告回應階段，且此玩家有可用宣告，且是本客戶端玩家
+            targetPlayerToDisplay.id === currentPlayer?.id || 
             (gameState.gamePhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE &&
              !!availableClaimsForClient?.find(c => c.playerId === targetPlayerToDisplay.id) &&
              targetPlayerToDisplay.id === clientPlayerId)
         }
-        isHumanPlayerView={playerDisplayPosition === 'bottom'} // 是否為主視角
+        isHumanPlayerView={playerDisplayPosition === 'bottom'} 
         onTileClick={playerDisplayPosition === 'bottom' ? handleTileClick : undefined}
         selectedTileId={playerDisplayPosition === 'bottom' ? selectedTileId : null}
         position={playerDisplayPosition}
@@ -427,101 +396,112 @@ const GameBoard: React.FC<GameBoardProps> = ({
     );
   };
 
-  // --- 判斷當前真人玩家是否可以摸牌或打牌的邏輯 ---
-  let canHumanPlayerDraw = false; // 是否可以摸牌
-  let canHumanPlayerDiscard = false; // 是否可以打牌
+  let canHumanPlayerDraw = false; 
+  let canHumanPlayerDiscard = false; 
 
-  // 只有在遊戲進行中且非宣告階段，才判斷摸打牌權限
   if (humanPlayer &&
       gameState.gamePhase !== GamePhase.GAME_OVER &&
       gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS &&
       gameState.gamePhase !== GamePhase.ROUND_OVER &&
       gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES &&
-      gameState.gamePhase !== GamePhase.AWAITING_ALL_CLAIMS_RESPONSE // 新增：宣告回應階段不能摸打
+      gameState.gamePhase !== GamePhase.AWAITING_ALL_CLAIMS_RESPONSE 
     ) {
-    const humanIsCurrentPlayer = currentPlayer?.id === humanPlayer.id; // 當前是否輪到此真人玩家
-
-    if (humanIsCurrentPlayer) { // 如果輪到此真人玩家
+    const humanIsCurrentPlayer = currentPlayer?.id === humanPlayer.id; 
+    if (humanIsCurrentPlayer) { 
         if (gameState.gamePhase === GamePhase.PLAYER_TURN_START) {
-            canHumanPlayerDraw = true; // 回合開始，可以摸牌
+            canHumanPlayerDraw = true; 
         }
         if (gameState.gamePhase === GamePhase.PLAYER_DRAWN && gameState.lastDrawnTile) {
-            canHumanPlayerDiscard = true; // 已摸牌，可以打牌
+            canHumanPlayerDiscard = true; 
         }
-        // 如果是吃碰槓後等待出牌的階段
         if (gameState.gamePhase === GamePhase.AWAITING_DISCARD) {
             canHumanPlayerDiscard = true;
         }
     }
   }
-  // --- 摸打牌權限判斷邏輯結束 ---
-
-  // 獲取當前遊戲階段的顯示名稱
   const phaseDisplayName = GamePhaseTranslations[gameState.gamePhase] || gameState.gamePhase;
-
-  // 判斷計時器是否對當前真人玩家激活
   const isTimerActiveForHuman = humanPlayer && gameState.actionTimer !== null && gameState.actionTimer > 0 &&
-                                ( (gameState.actionTimerType === 'turn' && currentPlayer?.id === humanPlayer.id) || // 回合計時器
-                                  (gameState.actionTimerType === 'global_claim' && !!availableClaimsForClient && availableClaimsForClient.length > 0) // 全局宣告計時器
+                                ( (gameState.actionTimerType === 'turn' && currentPlayer?.id === humanPlayer.id) || 
+                                  (gameState.actionTimerType === 'global_claim' && !!availableClaimsForClient && availableClaimsForClient.length > 0) 
                                 );
-  // 計時器的最大值
   const maxTimerValue = gameState.actionTimerType === 'global_claim' || gameState.actionTimerType === 'claim'
                         ? CLAIM_DECISION_TIMEOUT_SECONDS
                         : PLAYER_TURN_ACTION_TIMEOUT_SECONDS;
 
+  let gameOverModalTitle = "遊戲結束"; // 預設標題
+  let gameOverModalContent: React.ReactNode = <p>遊戲已結束。</p>; // 預設內容
+  let roundOverModalDetails: Parameters<typeof NextRoundConfirmModal>[0]['roundOverDetails'] = null; 
+  let lastRoundResultTitle = "本局結果";
+  let lastRoundResultContent: React.ReactNode = <p>本局已結束。</p>;
 
-  // --- 遊戲結束/本局結束模態框的內容準備 ---
-  let gameOverModalTitle = "遊戲結束";
-  let gameOverModalContent: React.ReactNode = <p>遊戲已結束。</p>;
-  let roundOverModalDetails: Parameters<typeof NextRoundConfirmModal>[0]['roundOverDetails'] = null; // 用於 NextRoundConfirmModal 的詳細資訊
 
   if (gameState.gamePhase === GamePhase.GAME_OVER || gameState.gamePhase === GamePhase.ROUND_OVER || gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES) {
-    if (gameState.winnerId !== null) { // 如果有贏家
+    let resultMessage = "";
+    if (gameState.winnerId !== null) { 
         const winner = gameState.players.find(p => p.id === gameState.winnerId);
         if (winner) {
-            // 設定 NextRoundConfirmModal 的詳細資訊
             roundOverModalDetails = { winnerName: winner.name, winType: gameState.winType, winningTileKind: gameState.winningDiscardedTile?.kind || gameState.lastDrawnTile?.kind };
-            if (gameState.winType === 'selfDrawn') { // 自摸
-                gameOverModalTitle = `${winner.name} 自摸!`;
-                gameOverModalContent = <p>恭喜 {winner.name}，自摸獲勝！</p>;
-            } else if (gameState.winType === 'discard' && gameState.winningDiscardedTile && gameState.winningTileDiscarderId !== null) { // 食胡
+            if (gameState.winType === 'selfDrawn') { 
+                resultMessage = `恭喜 ${winner.name}，自摸獲勝！${roundOverModalDetails.winningTileKind ? ` (胡 ${roundOverModalDetails.winningTileKind})` : ''}`;
+            } else if (gameState.winType === 'discard' && gameState.winningDiscardedTile && gameState.winningTileDiscarderId !== null) { 
                 const discarder = gameState.players.find(p => p.id === gameState.winningTileDiscarderId);
-                gameOverModalTitle = `${winner.name} 胡牌!`;
-                gameOverModalContent = <p>恭喜 {winner.name}！胡了由 ${discarder?.name || '某玩家'} 打出的【{gameState.winningDiscardedTile.kind}】。</p>;
+                resultMessage = `恭喜 ${winner.name}！胡了由 ${discarder?.name || '某玩家'} 打出的【${gameState.winningDiscardedTile.kind}】。`;
                 roundOverModalDetails.discarderName = discarder?.name || '某玩家';
-            } else { // 其他胡牌情況
-                gameOverModalTitle = `${winner.name} 胡牌了!`;
-                gameOverModalContent = <p>恭喜 {winner.name}!</p>;
+            } else { 
+                resultMessage = `恭喜 ${winner.name} 獲勝！`;
             }
         }
-    } else if (gameState.isDrawGame) { // 流局
-        gameOverModalTitle = "流局!";
-        gameOverModalContent = <p>無人胡牌，本局為流局。</p>;
+    } else if (gameState.isDrawGame) { 
+        resultMessage = "無人胡牌，本局為流局。";
         roundOverModalDetails = { isDrawGame: true };
     }
-    // 根據不同階段設定模態框標題
+
+    lastRoundResultContent = <p className="text-lg text-slate-200 mb-4">{resultMessage || "本局已結束。"}</p>;
+    
     if (gameState.gamePhase === GamePhase.ROUND_OVER) {
-        gameOverModalTitle = `第 ${gameState.currentRound} 局結束`;
-    } else if (gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES) {
+        gameOverModalTitle = `第 ${gameState.currentRound} 局結束`; // 此標題用於 NextRoundConfirmModal
+        lastRoundResultTitle = `第 ${gameState.currentRound} 局結果`;
+    } else if (gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES && gameState.matchOver) {
         gameOverModalTitle = `比賽結束 (共 ${gameState.numberOfRounds || initialGameState.numberOfRounds || 1} 局)`;
+        lastRoundResultTitle = "最後一局結果";
+        // 準備最終積分榜 (用於第二步的 gameOverModalContent)
+        const sortedPlayersByScore = [...gameState.players].sort((a, b) => b.score - a.score);
+        gameOverModalContent = (
+          <div className="text-left mt-4">
+            <p className="mb-3 text-slate-100 text-lg">最終總積分榜：</p>
+            <ul className="space-y-1 max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700/50">
+              {sortedPlayersByScore.map((p, index) => (
+                <li 
+                  key={p.id} 
+                  className={`flex justify-between items-center p-2.5 rounded-md text-base
+                    ${index === 0 ? 'bg-amber-500/40 text-amber-100 ring-2 ring-amber-400' : 
+                     (index === 1 ? 'bg-gray-400/40 text-gray-50 ring-2 ring-gray-300' :    
+                      (index === 2 ? 'bg-orange-600/40 text-orange-100 ring-2 ring-orange-500' : 
+                       'bg-slate-700/60 text-slate-200'))}`}
+                >
+                  <span className="font-semibold">
+                    {index === 0 ? '🏆 ' : (index === 1 ? '🥈 ' : (index === 2 ? '🥉 ' : ` ${index + 1}. `))}
+                    {p.name}
+                  </span>
+                  <span className="font-bold">{p.score.toLocaleString()} 分</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
     }
   }
-  // --- 模態框內容準備結束 ---
 
-  // 初始載入時，如果玩家列表為空，顯示等待訊息
+
   if (gameState.gamePhase === GamePhase.LOADING && gameState.players.length === 0) {
     return <div className="w-full h-full flex items-center justify-center text-xl">等待伺服器同步遊戲狀態...</div>;
   }
 
-  // 獲取當前真人玩家的再戰投票狀態
   const humanPlayerVote = humanPlayer && gameState.rematchVotes?.find(v => v.playerId === humanPlayer.id)?.vote;
 
-  // --- JSX 渲染 ---
   return (
     <div className="w-full h-full max-w-7xl max-h-[1000px] bg-slate-800 shadow-2xl rounded-xl p-3 grid grid-cols-[180px_1fr_180px] grid-rows-[180px_1fr_180px] gap-2 relative landscape-mode">
-      {/* 右上角控制按鈕區域 */}
       <div className="absolute top-3 right-3 z-50 flex items-center space-x-3">
-        {/* 麥克風按鈕 - 只有在支援且本地流存在時才可操作 */}
         {isVoiceChatSupported && localAudioStream && (
             <button
                 onClick={onToggleMute}
@@ -534,7 +514,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 {isMicrophoneMuted ? <MicrophoneOffIcon className="w-5 h-5" /> : <MicrophoneOnIcon className="w-5 h-5" />}
             </button>
         )}
-         {/* 麥克風按鈕 - 禁用狀態 */}
         {(!isVoiceChatSupported || !localAudioStream) && (
             <button
                 className="p-2 bg-slate-500 rounded-full text-slate-400 cursor-not-allowed"
@@ -545,7 +524,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <MicrophoneOffIcon className="w-5 h-5" />
             </button>
         )}
-        {/* 設定按鈕 */}
         <button
             onClick={toggleSettingsPanel}
             className="p-2 bg-slate-700/50 hover:bg-slate-600 rounded-full text-white transition-colors"
@@ -554,21 +532,18 @@ const GameBoard: React.FC<GameBoardProps> = ({
         >
             <SettingsIcon className="w-5 h-5" />
         </button>
-        {/* 離開房間按鈕 */}
         <ActionButton
             label="離開房間"
             onClick={onQuitGame}
             variant="secondary"
             size="sm"
-            disabled={isSubmitting} // 如果正在提交動作，則禁用
-            className="!px-3 !py-1.5 text-xs" // 強制設定更小的內外邊距和字體大小
+            disabled={isSubmitting} 
+            className="!px-3 !py-1.5 text-xs" 
         />
       </div>
 
-      {/* 動作宣告動畫顯示區域 (過濾只顯示主要動作) */}
       {actionAnnouncements
         .filter(ann => {
-          // 只顯示明確的遊戲動作宣告，不顯示牌面本身 (打牌動作由牌桌中央的棄牌顯示)
           const specialActions = ["碰", "吃", "槓", "明槓", "暗槓", "加槓", "胡", "自摸", "天胡", "一炮多響"];
           return specialActions.includes(ann.text);
         })
@@ -576,35 +551,28 @@ const GameBoard: React.FC<GameBoardProps> = ({
         <ActionAnnouncer key={ann.id} announcement={ann} />
       ))}
 
-
-      {/* 玩家顯示區域 - 只有在非等待階段才渲染 */}
       {gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS && gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && (
         <>
-          {/* 上方玩家 */}
           <div className="col-start-2 row-start-1 flex">
             {renderPlayer('top')}
           </div>
-          {/* 左側玩家 */}
           <div className="col-start-1 row-start-2 flex justify-center items-center">
             {renderPlayer('left')}
           </div>
-          {/* 右側玩家 */}
           <div className="col-start-3 row-start-2 flex justify-center items-center">
             {renderPlayer('right')}
           </div>
-          {/* 底部玩家 (真人主視角) */}
           <div className="col-start-2 row-start-3 flex flex-row items-stretch">
             {renderPlayer('bottom')}
-            {/* 如果是真人玩家回合，且已摸牌，則在手牌旁邊顯示剛摸到的牌 */}
             {humanPlayer &&
                 currentPlayer?.id === humanPlayer.id &&
                 gameState.gamePhase === GamePhase.PLAYER_DRAWN &&
                 gameState.lastDrawnTile && (
-                <div className="ml-2 flex items-center justify-center relative z-10"> {/* 確保摸到的牌在最上層 */}
+                <div className="ml-2 flex items-center justify-center relative z-10"> 
                     <TileDisplay
                         tile={gameState.lastDrawnTile}
-                        onClick={() => handleTileClick(gameState.lastDrawnTile!)} // 點擊剛摸到的牌可以選中它
-                        isSelected={selectedTileId === gameState.lastDrawnTile.id} // 是否被選中
+                        onClick={() => handleTileClick(gameState.lastDrawnTile!)} 
+                        isSelected={selectedTileId === gameState.lastDrawnTile.id} 
                         size="medium"
                     />
                 </div>
@@ -613,14 +581,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
         </>
       )}
 
-      {/* 牌桌中央區域 - 只有在遊戲進行中才渲染 */}
       {gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS &&
        gameState.gamePhase !== GamePhase.ROUND_OVER &&
        gameState.gamePhase !== GamePhase.GAME_OVER &&
        gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES &&
        (
           <div className="col-start-2 row-start-2 bg-green-900/50 rounded-lg shadow-inner p-4 flex flex-col items-center justify-between relative overflow-hidden">
-            {/* 左上角房間和遊戲資訊 */}
             <div className="absolute top-3 left-3 z-10 w-[calc(100%-24px)] flex justify-between items-start">
                 <div className="text-base text-slate-200 p-2 bg-black/50 rounded shadow-md">
                     <div>房間: <span className="font-semibold text-amber-200">{roomSettings.roomName}</span></div>
@@ -628,7 +594,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     <div className="mt-1">狀態: <span className="font-semibold text-sky-300">{phaseDisplayName}</span></div>
                 </div>
 
-                {/* 右上角行動計時器 (如果激活) */}
                 {isTimerActiveForHuman && gameState.actionTimer !== null && (
                   <div className="flex flex-col items-center p-2 bg-black/50 rounded shadow-md">
                     <div className="text-base md:text-lg text-amber-300 font-semibold">
@@ -636,33 +601,29 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     </div>
                     <ProgressBar
                         currentTime={gameState.actionTimer}
-                        maxTime={maxTimerValue} // 使用計算出的最大時間
-                        className="w-24 h-1.5 mt-1" // 進度條寬度和高度
+                        maxTime={maxTimerValue} 
+                        className="w-24 h-1.5 mt-1" 
                     />
                   </div>
                 )}
             </div>
 
-            {/* 牌堆顯示 */}
             <div className="mt-10 flex items-center space-x-2 text-base text-slate-200 p-2 bg-black/50 rounded">
                 <span>牌堆: {gameState.deck.length}</span>
-                {/* 顯示一張牌背代表牌堆 */}
                 {gameState.deck.length > 0 && <TileDisplay tile={null} size="medium" isHidden={true} />}
             </div>
 
-            {/* 棄牌堆顯示 */}
             <div className="w-full flex flex-col items-center my-2">
                 <div className="h-[166px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
                 {gameState.discardPile
-                .slice() // 創建副本以避免修改原陣列
-                .reverse() // 反轉順序，最新的棄牌顯示在最前面 (邏輯上) 或最後面 (視覺上，取決於 flex-wrap)
+                .slice() 
+                .reverse() 
                 .map((discardInfo: DiscardedTileInfo, index: number, reversedArray: DiscardedTileInfo[]) => (
-                    <div key={`${discardInfo.tile.id}-discard-wrapper-${index}`} className="m-0.5"> {/* 為每張棄牌添加外層 div 以應用 margin */}
+                    <div key={`${discardInfo.tile.id}-discard-wrapper-${index}`} className="m-0.5"> 
                     <TileDisplay
                         tile={discardInfo.tile}
                         size="medium"
                         isDiscarded
-                        // 最新棄牌的判斷：是反轉後陣列的最後一個元素，且其 ID 與 gameState.lastDiscardedTile 的 ID 相同
                         isLatestDiscard={index === reversedArray.length - 1 && gameState.lastDiscardedTile?.id === discardInfo.tile.id}
                     />
                     </div>
@@ -670,14 +631,13 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 </div>
             </div>
 
-            {/* 最新棄牌提示 (如果正在等待宣告) */}
             <div className="flex-grow w-full flex flex-col items-center justify-center">
                 {gameState.lastDiscardedTile &&
-                 (gameState.gamePhase === GamePhase.TILE_DISCARDED || // 舊的宣告階段
-                  gameState.gamePhase === GamePhase.AWAITING_CLAIMS_RESOLUTION || // 正在解決宣告
-                  gameState.gamePhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE || // 等待所有宣告回應
-                  gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION || // 等待特定玩家宣告 (舊流程)
-                  gameState.gamePhase === GamePhase.ACTION_PENDING_CHI_CHOICE // 正在選擇吃牌組合
+                 (gameState.gamePhase === GamePhase.TILE_DISCARDED || 
+                  gameState.gamePhase === GamePhase.AWAITING_CLAIMS_RESOLUTION || 
+                  gameState.gamePhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE || 
+                  gameState.gamePhase === GamePhase.AWAITING_PLAYER_CLAIM_ACTION || 
+                  gameState.gamePhase === GamePhase.ACTION_PENDING_CHI_CHOICE 
                   ) && (
                     <div className="-mt-10 mb-2 p-1 bg-yellow-600/30 rounded flex flex-col items-center">
                         <span className="text-xs text-yellow-200 mb-0.5">最新棄牌 (待宣告):</span>
@@ -686,24 +646,21 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 )}
             </div>
 
-            {/* 操作按鈕區域 */}
             <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex flex-wrap gap-2 justify-center items-center p-2 min-h-[50px] w-auto max-w-full">
-                {/* 打牌按鈕 (如果可以打牌) */}
                 {canHumanPlayerDiscard && (
                 <ActionButton label="打牌" onClick={handleDiscard} disabled={!selectedTileId || isSubmitting} variant="danger" />
                 )}
-                {/* 宣告按鈕 (如果處於宣告回應階段且有可用宣告) */}
                 {gameState.gamePhase === GamePhase.AWAITING_ALL_CLAIMS_RESPONSE && availableClaimsForClient && humanPlayer && (
                 <>
                     {availableClaimsForClient.map(claim => {
                         let label = '';
-                        let actionType: 'Hu' | 'Peng' | 'Gang' | 'Chi' = claim.action; // 確保類型正確
+                        let actionType: 'Hu' | 'Peng' | 'Gang' | 'Chi' = claim.action; 
                         switch(claim.action) {
                             case 'Hu': label = '胡牌'; break;
                             case 'Peng': label = '碰'; break;
                             case 'Gang': label = '槓'; break;
                             case 'Chi': label = '吃'; break;
-                            default: return null; // 不應發生
+                            default: return null; 
                         }
                         return (
                             <ActionButton
@@ -711,22 +668,18 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                 label={label}
                                 onClick={() => {
                                     if (claim.action === 'Chi') {
-                                        // 如果是吃，且有可用的吃牌組合，則進入選擇組合的狀態
                                         if (localChiOptionsForClient && localChiOptionsForClient.length > 0) {
                                             setIsSelectingChiCombo(true);
                                         } else {
-                                            // 理論上不應發生，因為 availableClaimsForClient 應該與 localChiOptionsForClient 同步
                                             console.warn("[GameBoard] 選擇「吃」但無可用組合。自動跳過。");
-                                            handlePassClaimDecision(); // 作為備用，自動跳過
+                                            handlePassClaimDecision(); 
                                         }
                                     } else {
-                                        // 其他宣告直接提交
                                         emitPlayerAction({
                                             type: 'SUBMIT_CLAIM_DECISION',
                                             decision: {
                                                 playerId: clientPlayerId!,
                                                 action: actionType,
-                                                // 如果是碰或槓，記錄目標牌種
                                                 chosenPengGangTileKind: (claim.action === 'Peng' || claim.action === 'Gang') && gameState.lastDiscardedTile ? gameState.lastDiscardedTile.kind : undefined,
                                             }
                                         });
@@ -737,25 +690,20 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             />
                         );
                     })}
-                    {/* 跳過宣告按鈕 */}
                     <ActionButton label="跳過" onClick={handlePassClaimDecision} variant="secondary" disabled={isSubmitting} />
                 </>
                 )}
-                 {/* 摸牌前/後的自摸、暗槓、加槓按鈕 */}
-                 { (gameState.gamePhase === GamePhase.PLAYER_TURN_START || // 回合開始 (摸牌前)
-                    gameState.gamePhase === GamePhase.PLAYER_DRAWN ||       // 已摸牌
-                    (gameState.gamePhase === GamePhase.AWAITING_DISCARD && currentPlayer?.isDealer && gameState.turnNumber === 1) // 莊家開局打第一張前
+                 { (gameState.gamePhase === GamePhase.PLAYER_TURN_START || 
+                    gameState.gamePhase === GamePhase.PLAYER_DRAWN ||       
+                    (gameState.gamePhase === GamePhase.AWAITING_DISCARD && currentPlayer?.isDealer && gameState.turnNumber === 1) 
                    ) && humanPlayer && currentPlayer?.id === humanPlayer.id && (
                     <>
-                        {/* 暗槓按鈕 (檢查手牌+摸到的牌) */}
                         {canDeclareAnGang(humanPlayer.hand, gameState.lastDrawnTile).map(kind => (
                             <ActionButton key={`an-gang-${kind}`} label={`暗槓 ${kind}`} onClick={() => emitPlayerAction({ type: 'DECLARE_AN_GANG', tileKind: kind })} variant="warning" disabled={isSubmitting} />
                         ))}
-                        {/* 加槓按鈕 (檢查已碰面子和摸到的牌) */}
                         {gameState.lastDrawnTile && canDeclareMingGangFromHand(humanPlayer.hand, humanPlayer.melds, gameState.lastDrawnTile).map(gangOption => (
                             <ActionButton key={`ming-gang-hand-${gangOption.pengMeldKind}`} label={`加槓 ${gangOption.pengMeldKind}`} onClick={() => emitPlayerAction({ type: 'DECLARE_MING_GANG_FROM_HAND', tileKind: gangOption.pengMeldKind })} variant="warning" disabled={isSubmitting} />
                         ))}
-                        {/* 自摸按鈕 */}
                         {checkWinCondition(
                             gameState.gamePhase === GamePhase.PLAYER_DRAWN && gameState.lastDrawnTile ? [...humanPlayer.hand, gameState.lastDrawnTile] : humanPlayer.hand,
                             humanPlayer.melds
@@ -768,7 +716,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
           </div>
        )}
 
-      {/* 聊天面板開關按鈕 */}
       <button
         onClick={() => setShowChatPanel(prev => !prev)}
         className="fixed bottom-4 right-4 z-30 p-3 bg-sky-600 hover:bg-sky-700 rounded-full text-white shadow-lg transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-sky-400"
@@ -778,7 +725,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         <ChatBubbleIcon className="w-6 h-6" />
       </button>
 
-      {/* 聊天面板 */}
       <ChatPanel
         isOpen={showChatPanel}
         onClose={() => setShowChatPanel(false)}
@@ -787,15 +733,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
         currentPlayerName={humanPlayer?.name || `玩家${clientPlayerId}`}
       />
 
-      {/* 吃牌選擇模態框 */}
       {isSelectingChiCombo && localChiOptionsForClient && localChiOptionsForClient.length > 0 && humanPlayer && gameState.lastDiscardedTile && (
-        <GameModal isOpen={isSelectingChiCombo} title="選擇吃的組合" onClose={() => { setIsSelectingChiCombo(false); handlePassClaimDecision(); /* 如果關閉視窗則視為跳過 */ }}>
+        <GameModal isOpen={isSelectingChiCombo} title="選擇吃的組合" onClose={() => { setIsSelectingChiCombo(false); handlePassClaimDecision();  }}>
           <div className="space-y-3">
             <p className="text-slate-300 mb-3">請選擇您要與【{gameState.lastDiscardedTile.kind}】組合成順子的手牌：</p>
             {localChiOptionsForClient.map((handTilesOption, index) => {
-              // 將手牌和被吃的牌組合成完整順子
               const fullShunziCandidate: Tile[] = [...handTilesOption, gameState.lastDiscardedTile!];
-              // 根據 orderValue 降序排列以獲得標準顯示順序 (例如 將, 士, 象)
               const displayedShunzi = [...fullShunziCandidate].sort((a, b) => 
                 TILE_KIND_DETAILS[b.kind].orderValue - TILE_KIND_DETAILS[a.kind].orderValue
               );
@@ -811,7 +754,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       key={tileInShunzi.id}
                       tile={tileInShunzi} 
                       size="small" 
-                      // 如果這張牌是被吃的牌 (lastDiscardedTile)，則高亮它
                       isChiTarget={tileInShunzi.id === gameState.lastDiscardedTile!.id} 
                     />
                   ))}
@@ -825,7 +767,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         </GameModal>
       )}
 
-      {/* 等待房間模態框 (僅在等待階段顯示) */}
       {gameState.gamePhase === GamePhase.WAITING_FOR_PLAYERS && (
         <WaitingRoomModal
             isOpen={true}
@@ -839,47 +780,71 @@ const GameBoard: React.FC<GameBoardProps> = ({
             numberOfRounds={gameState.numberOfRounds || initialGameState.numberOfRounds || 1}
         />
       )}
-      {/* 本局結束/下一局確認模態框 (僅在本局結束階段顯示，且不是最終比賽結束等待再戰投票時) */}
       {gameState.gamePhase === GamePhase.ROUND_OVER && !gameState.matchOver && (
           <NextRoundConfirmModal
             isOpen={true}
-            title={gameOverModalTitle}
+            title={gameOverModalTitle} // This title will be "第 X 局結束"
             countdown={gameState.nextRoundCountdown}
             isHumanPlayer={!!humanPlayer}
             humanPlayerId={humanPlayer?.id}
             humanPlayersReadyForNextRound={gameState.humanPlayersReadyForNextRound}
             onConfirmNextRound={handleConfirmNextRound}
             onQuitGame={onQuitGame}
-            roundOverDetails={roundOverModalDetails}
+            roundOverDetails={roundOverModalDetails} // Contains details for the round that just ended
           />
       )}
-      {/* 比賽結束/再戰投票模態框 */}
       {gameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES && gameState.matchOver && (
-        <GameModal
-            isOpen={true}
-            title={gameOverModalTitle}
-            // 再戰投票時不允許點擊背景關閉
-        >
-            <div className="text-center">
-                {gameOverModalContent}
+        <>
+          {showFinalMatchResultsModalStep === 'roundResult' && (
+            <GameModal
+              isOpen={true}
+              title={lastRoundResultTitle} // e.g., "最後一局結果"
+            >
+              <div className="text-center">
+                {lastRoundResultContent} {/* Shows who won the last round */}
+                <div className="mt-6 space-x-3">
+                  <ActionButton
+                    label="查看總成績"
+                    onClick={() => setShowFinalMatchResultsModalStep('finalScore')}
+                    variant="primary"
+                    size="md"
+                  />
+                   <ActionButton 
+                        label="離開房間" 
+                        onClick={onQuitGame} 
+                        variant="secondary" 
+                        size="md" 
+                    />
+                </div>
+              </div>
+            </GameModal>
+          )}
+          {showFinalMatchResultsModalStep === 'finalScore' && (
+            <GameModal
+              isOpen={true}
+              title={gameOverModalTitle} // e.g., "比賽結束 (共 X 局)"
+            >
+              <div className="text-center">
+                {gameOverModalContent} {/* This is the final score list */}
                 <p className="mt-4 text-lg text-slate-100">
-                    {gameState.rematchCountdown !== null
-                        ? `再戰投票剩餘: ${gameState.rematchCountdown}s`
-                        : "等待投票結果..."
-                    }
+                  {gameState.rematchCountdown !== null
+                    ? `再戰投票剩餘: ${gameState.rematchCountdown}s`
+                    : "等待投票結果..."}
                 </p>
                 {humanPlayer && humanPlayerVote === 'pending' && gameState.rematchCountdown !== null && (
-                    <ActionButton label="同意再戰" onClick={handleVoteRematch} variant="primary" size="md" className="mt-6" />
+                  <ActionButton label="同意再戰" onClick={handleVoteRematch} variant="primary" size="md" className="mt-6" />
                 )}
                 {humanPlayer && humanPlayerVote === 'yes' && (
-                     <p className="mt-4 text-green-400">您已同意再戰，等待其他玩家...</p>
+                  <p className="mt-4 text-green-400">您已同意再戰，等待其他玩家...</p>
                 )}
-                 {!humanPlayer && (
-                     <p className="mt-4 text-slate-400">AI 將自動處理再戰決定。</p>
+                {!humanPlayer && (
+                  <p className="mt-4 text-slate-400">AI 將自動處理再戰決定。</p>
                 )}
                 <ActionButton label="離開房間" onClick={onQuitGame} variant="secondary" size="md" className="mt-4" />
-            </div>
-        </GameModal>
+              </div>
+            </GameModal>
+          )}
+        </>
       )}
     </div>
   );

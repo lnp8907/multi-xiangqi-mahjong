@@ -20,7 +20,8 @@ export const initializeOrResetGameForRound = (room: GameRoom, isNewMatch: boolea
     if (isNewMatch) {
         room.gameState.currentRound = 1;
         room.gameState.matchOver = false;
-        room.players.forEach(p => p.score = 0);
+        // 當 isNewMatch 為 true 時，分數的重置或延續由 matchHandler.ts 控制，此處不再重置分數。
+        // room.players.forEach(p => p.score = 0); // <--- 移除此行，分數延續由 matchHandler 決定
         if (room.players.length > 0) {
             room.gameState.dealerIndex = Math.floor(Math.random() * room.players.length);
             room.players.forEach((p) => p.isDealer = (p.id === room.gameState.dealerIndex));
