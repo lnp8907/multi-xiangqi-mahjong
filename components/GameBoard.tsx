@@ -643,15 +643,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
             </div>
 
             {/* 牌堆顯示 */}
-            <div className="mt-20 flex items-center space-x-2 text-base text-slate-200 p-2 bg-black/50 rounded">
+            <div className="mt-10 flex items-center space-x-2 text-base text-slate-200 p-2 bg-black/50 rounded">
                 <span>牌堆: {gameState.deck.length}</span>
                 {/* 顯示一張牌背代表牌堆 */}
-                {gameState.deck.length > 0 && <TileDisplay tile={null} size="large" isHidden={true} />}
+                {gameState.deck.length > 0 && <TileDisplay tile={null} size="medium" isHidden={true} />}
             </div>
 
             {/* 棄牌堆顯示 */}
             <div className="w-full flex flex-col items-center my-2">
-                <div className="h-[230px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
+                <div className="h-[250px] w-full max-w-2xl p-1 bg-black/30 rounded flex flex-wrap justify-start items-start content-start overflow-y-auto scrollbar-thin scrollbar-thumb-slate-500 scrollbar-track-slate-700">
                 {gameState.discardPile
                 .slice() // 創建副本以避免修改原陣列
                 .reverse() // 反轉順序，最新的棄牌顯示在最前面 (邏輯上) 或最後面 (視覺上，取決於 flex-wrap)
@@ -787,19 +787,37 @@ const GameBoard: React.FC<GameBoardProps> = ({
       />
 
       {/* 吃牌選擇模態框 */}
-      {isSelectingChiCombo && localChiOptionsForClient && localChiOptionsForClient.length > 0 && humanPlayer && (
+      {isSelectingChiCombo && localChiOptionsForClient && localChiOptionsForClient.length > 0 && humanPlayer && gameState.lastDiscardedTile && (
         <GameModal isOpen={isSelectingChiCombo} title="選擇吃的組合" onClose={() => { setIsSelectingChiCombo(false); handlePassClaimDecision(); /* 如果關閉視窗則視為跳過 */ }}>
           <div className="space-y-3">
-            <p className="text-slate-300">請選擇您要用來吃【{gameState.lastDiscardedTile?.kind}】的兩張手牌：</p>
-            {localChiOptionsForClient.map((option, index) => (
-              <div key={index} className="flex items-center justify-start space-x-2 p-2 bg-slate-700 rounded-md hover:bg-slate-600 cursor-pointer" onClick={() => handleChiSelect(option)}>
-                <TileDisplay tile={option[0]} size="small" />
-                <span className="text-slate-200">+</span>
-                <TileDisplay tile={option[1]} size="small" />
-                <span className="text-slate-200">= 吃 【{gameState.lastDiscardedTile?.kind}】</span>
-              </div>
-            ))}
-            <div className="mt-4 flex justify-end">
+            <p className="text-slate-300 mb-3">請選擇您要與【{gameState.lastDiscardedTile.kind}】組合成順子的手牌：</p>
+            {localChiOptionsForClient.map((handTilesOption, index) => {
+              // 將手牌和被吃的牌組合成完整順子
+              const fullShunziCandidate: Tile[] = [...handTilesOption, gameState.lastDiscardedTile!];
+              // 根據 orderValue 降序排列以獲得標準顯示順序 (例如 將, 士, 象)
+              const displayedShunzi = [...fullShunziCandidate].sort((a, b) => 
+                TILE_KIND_DETAILS[b.kind].orderValue - TILE_KIND_DETAILS[a.kind].orderValue
+              );
+
+              return (
+                <div 
+                  key={index} 
+                  className="flex items-center justify-start space-x-1.5 p-2 bg-slate-700 rounded-md hover:bg-slate-600 cursor-pointer transition-colors" 
+                  onClick={() => handleChiSelect(handTilesOption)}
+                >
+                  {displayedShunzi.map(tileInShunzi => (
+                    <TileDisplay 
+                      key={tileInShunzi.id}
+                      tile={tileInShunzi} 
+                      size="small" 
+                      // 如果這張牌是被吃的牌 (lastDiscardedTile)，則高亮它
+                      isChiTarget={tileInShunzi.id === gameState.lastDiscardedTile!.id} 
+                    />
+                  ))}
+                </div>
+              );
+            })}
+            <div className="mt-5 flex justify-end">
                  <ActionButton label="取消 (跳過)" onClick={() => { setIsSelectingChiCombo(false); handlePassClaimDecision(); }} variant="secondary" />
             </div>
           </div>
@@ -850,7 +868,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     }
                 </p>
                 {humanPlayer && humanPlayerVote === 'pending' && gameState.rematchCountdown !== null && (
-                    <ActionButton label="同意再戰" onClick={handleVoteRematch} variant="primary" size="lg" className="mt-6" />
+                    <ActionButton label="同意再戰" onClick={handleVoteRematch} variant="primary" size="md" className="mt-6" />
                 )}
                 {humanPlayer && humanPlayerVote === 'yes' && (
                      <p className="mt-4 text-green-400">您已同意再戰，等待其他玩家...</p>
@@ -867,4 +885,3 @@ const GameBoard: React.FC<GameBoardProps> = ({
 };
 
 export default GameBoard;
-

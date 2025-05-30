@@ -42,9 +42,9 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
 }) => {
   const handLayoutClasses = {
     bottom: 'flex-row space-x-1 justify-center',
-    left: 'flex-col -space-y-8 items-center',
+    left: 'flex-col -space-y-7 items-center',
     top: 'flex-row-reverse space-x-1 space-x-reverse justify-center',
-    right: 'flex-col-reverse -space-y-8 space-y-reverse items-center',
+    right: 'flex-col-reverse -space-y-7 space-y-reverse items-center',
   };
 
   const meldsContainerLayoutClasses = {

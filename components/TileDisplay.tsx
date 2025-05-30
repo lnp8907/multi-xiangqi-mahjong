@@ -25,6 +25,8 @@ interface TileDisplayProps {
   characterOrientation?: 'vertical' | 'horizontal'; 
   /** @param {boolean} [isLatestDiscard=false] - 是否為最新打出的棄牌 (用於特殊高亮)。 */
   isLatestDiscard?: boolean;
+  /** @param {boolean} [isChiTarget=false] - 新增：此牌是否為「吃牌」宣告中的目標牌 (被吃的牌)。 */
+  isChiTarget?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ const TileDisplay: React.FC<TileDisplayProps> = ({
   isHidden = false, 
   characterOrientation = 'vertical', 
   isLatestDiscard = false,
+  isChiTarget = false, // 新增 prop
 }) => {
   // 如果 tile 不存在且非隱藏狀態，則不渲染任何內容
   if (!tile && !isHidden) return null;
@@ -118,6 +121,11 @@ const TileDisplay: React.FC<TileDisplayProps> = ({
   // 已公開面子的牌的樣式
   const revealedMeldClasses = isRevealedMeld ? 'shadow-sm' : ''; // 輕微陰影
 
+  // 新增：吃牌目標的高亮樣式
+  const chiTargetClasses = isChiTarget && !isHidden
+    ? 'ring-2 ring-cyan-400 shadow-md shadow-cyan-500/50 scale-105' // 青色光暈效果
+    : '';
+
   /**
    * @description 處理牌的點擊事件。
    * 僅在牌存在、onClick回調存在、且非棄牌/面子牌/牌背時觸發。
@@ -138,7 +146,7 @@ const TileDisplay: React.FC<TileDisplayProps> = ({
   return (
     <div
       // 組合所有 CSS class
-      className={`${baseClasses} ${sizeClasses[size]} ${colorClasses} ${selectedClasses} ${discardedEffectClasses} ${revealedMeldClasses}`}
+      className={`${baseClasses} ${sizeClasses[size]} ${colorClasses} ${selectedClasses} ${discardedEffectClasses} ${revealedMeldClasses} ${chiTargetClasses}`}
       onClick={handleClick} // 點擊事件
       title={isHidden ? '隱藏牌' : (tile ? `${tile.kind} (${tile.suit === Suit.RED ? '紅' : '黑'})` : '牌')} // 滑鼠懸停提示
       aria-hidden={isHidden} //輔助技術：是否隱藏

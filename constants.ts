@@ -81,7 +81,7 @@ export const ACTION_PRIORITY = {
 /** @description 非玩家回合宣告的思考時間 (秒)。 */
 export const CLAIM_DECISION_TIMEOUT_SECONDS = 30;
 /** @description 玩家回合內行動的思考時間 (秒)。 */
-export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 60;
+export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 30;
 
 /**
  * @description 新增：局數設定選項。

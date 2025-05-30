@@ -5,7 +5,7 @@
 import './logger';
 
 // ✅ 加入 express
-import express from 'express';
+import express, { Request, Response } from 'express'; // Modified: Import Request and Response
 // 引入 Node.js http 模組用於創建 HTTP 伺服器
 import { createServer } from 'http';
 // 引入 Socket.IO Server 類別及相關類型
@@ -22,9 +22,11 @@ import path from 'path';
 // ✅ 新增 Express 應用
 const app = express();
 
-app.use(express.static(path.join(__dirname, '../../dist/')));
+// app.use(express.static(path.join(__dirname, '../../dist/')));
 
-app.get('/', (_req, res) => {res.sendFile(path.join(__dirname, '../../dist/index.html'))})
+// app.get('/', (_req, res) => { // Modified: Add types to _req and res
+//   res.sendFile(path.join(__dirname, '../../dist/index.html'));
+// });
 
 // ✅ 包裝 HTTP server
 const httpServer = createServer(app);

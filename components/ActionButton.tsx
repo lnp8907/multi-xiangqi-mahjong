@@ -33,7 +33,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   onClick,
   disabled = false, // 預設為不禁用
   variant = 'primary', // 預設風格為 primary (主要)
-  size = 'md', // 預設大小為 md (中等)
+  size = 'lg', // 預設大小為 md (中等)
   icon,
   title, // 解構 title 屬性
   className = '', // 解構 className 屬性，預設為空字串
