@@ -24,7 +24,8 @@ class WebRTCManager {
   public onRemoteStreamAdded: ((socketId: string, stream: MediaStream) => void) | null = null;
   public onRemoteStreamRemoved: ((socketId: string) => void) | null = null;
   public onPlayerSpeaking: ((socketId: string, speaking: boolean) => void) | null = null;
-  public onPlayerMuted: ((socketId: string, muted: boolean) => void) | null = null; // 新增回調
+  public onPlayerMuted: ((socketId: string, muted: boolean) => void) | null = null;
+  public onIceConnectionFailed: ((socketId: string, playerId: number) => void) | null = null; // 新增回調
 
   private audioContext: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
@@ -44,7 +45,7 @@ class WebRTCManager {
     this.localStream = localStream;
     this.roomId = roomId;
     this.localPlayerId = localPlayerId;
-    this.addNotification = addNotification;
+    this.addNotification = addNotification; // addNotification 仍由 App.tsx 傳入，但不由 WebRTCManager 直接用於 ICE 失敗通知
 
     if (this.localStream) {
       this.initSpeakingDetection();
@@ -84,14 +85,13 @@ class WebRTCManager {
     }
     const average = sum / this.dataArray.length;
 
-    // 調整閾值以適應不同的麥克風靈敏度和背景噪音
-    const speakingThreshold = 15; // 可以調整此值
+    const speakingThreshold = 15; 
     const currentlySpeaking = average > speakingThreshold;
 
     if (currentlySpeaking !== this.isCurrentlySpeaking) {
       this.isCurrentlySpeaking = currentlySpeaking;
       if (this.onPlayerSpeaking) {
-        this.onPlayerSpeaking(this.socket.id, this.isCurrentlySpeaking); // 通知本地 UI
+        this.onPlayerSpeaking(this.socket.id, this.isCurrentlySpeaking); 
       }
       this.socket.emit('voiceChatSpeakingUpdate', { speaking: this.isCurrentlySpeaking });
     }
@@ -149,7 +149,6 @@ class WebRTCManager {
           this.onRemoteStreamAdded(peerSocketId, event.streams[0]);
         }
       } else {
-         // 有些瀏覽器可能只觸發 ontrack 而不是 streams[0]
          const inboundStream = new MediaStream();
          inboundStream.addTrack(event.track);
          if (this.onRemoteStreamAdded) {
@@ -159,10 +158,15 @@ class WebRTCManager {
     };
     
     pc.oniceconnectionstatechange = () => {
-        console.log(`[WebRTCManager] 與 ${peerSocketId} 的 ICE 連接狀態改變: ${pc.iceConnectionState}`);
+        const currentPeerInfo = this.peerPlayerInfo[peerSocketId]; // 在清理前捕獲資訊
+        console.log(`[WebRTCManager] 與 ${currentPeerInfo?.playerName || peerSocketId} 的 ICE 連接狀態改變: ${pc.iceConnectionState}`);
+        
         if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
-            this.addNotification(`${this.peerPlayerInfo[peerSocketId]?.playerName || '一位玩家'} 的語音連接已斷開。`, 'warning');
-            this.handlePeerDisconnect(peerSocketId);
+            if (this.onIceConnectionFailed && currentPeerInfo) {
+              this.onIceConnectionFailed(peerSocketId, currentPeerInfo.playerId);
+            }
+            // 確保在回調之後才完全清理，以便回調可以使用 peerPlayerInfo
+            this.handlePeerDisconnect(peerSocketId); 
         }
     };
 
@@ -183,11 +187,8 @@ class WebRTCManager {
   public handleIncomingSignal(fromSocketId: string, signal: any) {
     const pc = this.peerConnections[fromSocketId];
     if (!pc) {
-      // 如果連接不存在，可能是一個新的連接請求 (對方是起始者)
-      // 查找該用戶資訊，如果伺服器已廣播過
       const peerInfo = this.peerPlayerInfo[fromSocketId] || {playerName: `玩家 ${fromSocketId.substring(0,4)}`, playerId: -1, isMuted: false };
       this.createPeerConnection(fromSocketId, peerInfo.playerName, peerInfo.playerId, peerInfo.isMuted, false);
-      // 重新獲取 pc
       const newPc = this.peerConnections[fromSocketId];
       if(newPc) this.processSignal(newPc, fromSocketId, signal);
       else console.error(`[WebRTCManager] 處理信令時，與 ${fromSocketId} 的連接仍未創建成功。`);
@@ -224,20 +225,27 @@ class WebRTCManager {
         track.enabled = !muted;
       });
       console.log(`[WebRTCManager] 本地麥克風已 ${muted ? '靜音' : '取消靜音'}`);
-      // 通知其他客戶端此靜音狀態 (透過 App.tsx 中的 socket.emit)
     }
   }
 
   public handlePeerDisconnect(socketId: string) {
     const pc = this.peerConnections[socketId];
     if (pc) {
-      pc.close();
-      delete this.peerConnections[socketId];
-      delete this.peerPlayerInfo[socketId];
-      if (this.onRemoteStreamRemoved) {
-        this.onRemoteStreamRemoved(socketId);
+      if (pc.signalingState !== 'closed' && pc.iceConnectionState !== 'closed') {
+          pc.close();
       }
-      console.log(`[WebRTCManager] 與 ${socketId} 的連接已關閉。`);
+      delete this.peerConnections[socketId]; 
+      
+      // 只有當 peerPlayerInfo 仍然存在時才執行清理和回調
+      // 避免在 oniceconnectionstatechange 和 voiceChatUserLeft 雙重觸發時出錯
+      if (this.peerPlayerInfo[socketId]) {
+          const playerName = this.peerPlayerInfo[socketId].playerName;
+          delete this.peerPlayerInfo[socketId];
+          if (this.onRemoteStreamRemoved) {
+              this.onRemoteStreamRemoved(socketId);
+          }
+          console.log(`[WebRTCManager] 與 ${playerName || socketId} 的連接資源已清理。`);
+      }
     }
   }
 

@@ -187,6 +187,7 @@ export interface GameState {
   configuredFillWithAI: boolean;
   hostPlayerName: string;
   clientPlayerId?: number | null;
+  voiceEnabled: boolean; // 新增：房間是否允許語音聊天 (從 RoomSettings 同步)
 
   rematchVotes?: RematchVote[];
   rematchCountdown?: number | null;
@@ -206,6 +207,7 @@ export interface ClientRoomSettingsData {
   fillWithAI: boolean;
   password?: string;
   numberOfRounds?: number;
+  voiceEnabled?: boolean; // 新增：是否允許語音聊天 (預設為 true)
 }
 
 
@@ -222,6 +224,7 @@ export interface RoomSettings {
   hostName: string;
   password?: string;
   numberOfRounds?: number;
+  voiceEnabled: boolean; // 新增：房間是否允許語音聊天
   hostSocketId?: string;
 }
 
@@ -292,6 +295,7 @@ export interface RoomListData {
   passwordProtected: boolean;
   numberOfRounds?: number;
   hostName?: string;
+  voiceEnabled: boolean; // 新增：房間是否允許語音聊天
 }
 
 // --- 語音聊天相關類型 ---
@@ -329,7 +333,7 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
   userSetName: (name: string, callback?: (ack: {success: boolean, message?: string}) => void) => void;
-  lobbyCreateRoom: (settings: Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }, callback?: (ack: {success: boolean, roomId?: string, message?: string}) => void) => void;
+  lobbyCreateRoom: (settings: Omit<ClientRoomSettingsData, 'maxPlayers' | 'playerName'> & { playerName: string, voiceEnabled?: boolean }, callback?: (ack: {success: boolean, roomId?: string, message?: string}) => void) => void;
   lobbyJoinRoom: (data: { roomId: string; password?: string; playerName: string }, callback?: (ack: {success: boolean, message?: string}) => void) => void;
   lobbyGetRooms: () => void;
   lobbySendChatMessage: (messageText: string) => void;

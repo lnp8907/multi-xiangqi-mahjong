@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import ActionButton from './ActionButton'; // 引入動作按鈕組件
 import LockIcon from './icons/LockIcon';   // 引入鎖圖示組件
+import MicrophoneOnIcon from './icons/MicrophoneOnIcon'; // 引入麥克風開啟圖示
+import MicrophoneOffIcon from './icons/MicrophoneOffIcon'; // 引入麥克風關閉圖示
 import LobbyLeaderboard from './LobbyLeaderboard'; // 新增排行榜組件
 import LobbyChatPanel from './LobbyChatPanel';   // 新增聊天面板組件
 import { RoomListData, ChatMessage, ServerToClientEvents, ClientToServerEvents } from '../types'; // 引入類型定義
@@ -129,7 +131,11 @@ const Lobby: React.FC<LobbyProps> = ({
                 >
                   {/* 房間資訊 */}
                   <div className="flex items-center space-x-2">
-                    {room.passwordProtected && <LockIcon className="w-4 h-4 text-amber-400 flex-shrink-0" />} {/* 如果有密碼，顯示鎖圖示 */}
+                    {room.passwordProtected && <span title="有密碼鎖"><LockIcon className="w-4 h-4 text-amber-400 flex-shrink-0" /></span>}
+                    {room.voiceEnabled ? 
+                        <span title="語音已啟用"><MicrophoneOnIcon className="w-4 h-4 text-green-400 flex-shrink-0" /></span> : 
+                        <span title="語音已禁用"><MicrophoneOffIcon className="w-4 h-4 text-red-400 flex-shrink-0" /></span>
+                    }
                     <div>
                       <p className="font-semibold text-sky-200 text-sm sm:text-base">{room.name}</p>
                       <p className="text-xs sm:text-sm text-slate-300">

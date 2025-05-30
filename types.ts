@@ -190,6 +190,7 @@ export interface GameState {
   configuredFillWithAI: boolean; // 房間創建時設定的 AI 填充選項
   hostPlayerName: string; // 房間創建者的名稱
   clientPlayerId?: number | null; // 客戶端專用：當前客戶端對應的玩家 ID (座位索引 0-3)，伺服器不直接使用此欄位，而是透過 joinedRoom 事件傳遞
+  voiceEnabled?: boolean; // 新增：房間是否允許語音聊天
 
   // 再戰相關狀態
   rematchVotes?: RematchVote[]; // 玩家的再戰投票
@@ -210,6 +211,7 @@ export interface ClientRoomSettingsData {
   fillWithAI: boolean; // 若真人玩家不足，是否用 AI 填滿
   password?: string; // 房間密碼 (可選)
   numberOfRounds?: number; // 總局數 (改為可選)
+  voiceEnabled?: boolean; // 新增：是否允許語音聊天 (預設為 true)
   // playerName: string; // 玩家名稱，在 App.tsx 中發送請求前附加
 }
 
@@ -227,6 +229,7 @@ export interface RoomSettings {
   hostName: string; // 房主名稱
   password?: string; // 房間密碼 (可選)
   numberOfRounds?: number; // 總局數 (改為可選)
+  voiceEnabled: boolean; // 新增：房間是否允許語音聊天
   hostSocketId?: string; // (僅伺服器端使用) 房主的 socket ID
 }
 
@@ -309,6 +312,7 @@ export interface RoomListData {
   passwordProtected: boolean; // 是否有密碼保護
   numberOfRounds?: number; // 房間設定的總局數
   hostName?: string; // (可選) 房主名稱
+  voiceEnabled: boolean; // 新增：房間是否允許語音聊天
 }
 
 // --- 語音聊天相關類型 ---
@@ -366,7 +370,7 @@ export interface ClientToServerEvents {
   userSetName: (name: string, callback?: (ack: {success: boolean, message?: string}) => void) => void;
 
   // --- 大廳事件 ---
-  lobbyCreateRoom: (settings: Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }, callback?: (ack: {success: boolean, roomId?: string, message?: string}) => void) => void;
+  lobbyCreateRoom: (settings: Omit<ClientRoomSettingsData, 'maxPlayers' | 'playerName'> & { playerName: string, voiceEnabled?: boolean }, callback?: (ack: {success: boolean, roomId?: string, message?: string}) => void) => void;
   lobbyJoinRoom: (data: { roomId: string; password?: string; playerName: string }, callback?: (ack: {success: boolean, message?: string}) => void) => void;
   lobbyGetRooms: () => void;
   lobbySendChatMessage: (messageText: string) => void;
@@ -400,6 +404,7 @@ export interface SocketData {
   playerName: string; // 此 Socket 連接對應的玩家名稱
   currentRoomId?: string; // 此 Socket 當前所在的房間 ID
   playerId?: number; // 此 Socket 在遊戲中的座位索引
+  isMutedInVoiceChat?: boolean; // 新增：伺服器端記錄的該 socket 語音靜音狀態
 }
 
 /**

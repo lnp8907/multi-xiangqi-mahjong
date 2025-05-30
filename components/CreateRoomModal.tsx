@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import GameModal from './GameModal'; // 引入通用模態框組件
 import ActionButton from './ActionButton'; // 引入動作按鈕組件
@@ -39,6 +40,8 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
   const [humanPlayers, setHumanPlayers] = useState<number>(1); // 預設至少1位真人玩家
   /** @description 遊戲總局數的狀態。 */
   const [numberOfRounds, setNumberOfRounds] = useState<number>(ROUND_OPTIONS[0].value); // 預設為第一個局數選項
+  /** @description 是否允許遊戲語音的狀態。 */
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true); // 新增：預設允許語音
 
   /**
    * @description 處理表單提交（創建房間）的邏輯。
@@ -56,6 +59,7 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
       humanPlayers: humanPlayers, // 真人玩家數量
       fillWithAI: true, // 若真人玩家不足，則總是嘗試用 AI 補齊 (伺服器端會根據 humanPlayers 和 maxPlayersFixed 計算 AI 數量)
       numberOfRounds: numberOfRounds, // 總局數
+      voiceEnabled: voiceEnabled, // 新增：傳遞語音設定
     });
     // 創建成功或失敗的提示將由 App.tsx 在收到伺服器回應後透過 addNotification 顯示
     // 此處不需要再做提示
@@ -135,6 +139,22 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onCr
           </select>
           <p className="text-xs text-slate-400 mt-1 px-1">遊戲為四人制。若真人玩家不足四人，將由 AI 自動補齊空位。</p>
         </div>
+
+        {/* 允許遊戲語音選項 */}
+        <div className="flex items-center">
+          <input
+            id="voiceEnabled"
+            name="voiceEnabled"
+            type="checkbox"
+            checked={voiceEnabled}
+            onChange={(e) => setVoiceEnabled(e.target.checked)}
+            className="h-4 w-4 text-sky-600 border-slate-500 rounded focus:ring-sky-500 bg-slate-700"
+          />
+          <label htmlFor="voiceEnabled" className="ml-2 block text-sm text-slate-300">
+            允許房間語音聊天 (建議)
+          </label>
+        </div>
+
       </div>
       {/* 底部按鈕區域：取消和創建房間 */}
       <div className="mt-6 flex justify-end space-x-3">

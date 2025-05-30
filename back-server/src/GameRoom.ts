@@ -82,9 +82,10 @@ export class GameRoom {
   ) {
     this.io = io;
     this.roomId = roomId;
-    this.roomSettings = {
+    this.roomSettings = { // 確保 voiceEnabled 被正確初始化
         ...settings,
         numberOfRounds: settings.numberOfRounds || DEFAULT_NUMBER_OF_ROUNDS,
+        voiceEnabled: settings.voiceEnabled === undefined ? true : settings.voiceEnabled,
     };
     this.aiService = new AIService();
     this.onRoomEmptyCallback = onRoomEmptyCallback;
@@ -132,6 +133,7 @@ export class GameRoom {
       configuredHumanPlayers: this.roomSettings.humanPlayers,
       configuredFillWithAI: this.roomSettings.fillWithAI,
       hostPlayerName: this.roomSettings.hostName,
+      voiceEnabled: this.roomSettings.voiceEnabled, // 新增：從 roomSettings 初始化
       rematchVotes: [],
       rematchCountdown: null,
       submittedClaims: [],
@@ -213,6 +215,7 @@ export class GameRoom {
         configuredFillWithAI: this.roomSettings.fillWithAI,
         hostPlayerName: this.roomSettings.hostName,
         numberOfRounds: this.roomSettings.numberOfRounds,
+        voiceEnabled: this.roomSettings.voiceEnabled, // 確保 voiceEnabled 在 gameState 中
     };
     return currentFullGameState;
   }
@@ -258,7 +261,7 @@ export class GameRoom {
   }
 
 public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>, playerName: string, isHost: boolean): boolean {
-    console.info(`[GameRoom ${this.roomId}] addPlayer: 嘗試加入玩家 ${playerName} (房主: ${isHost})。目前房間內玩家數: ${this.players.length}`);
+    console.info(`[GameRoom ${this.roomId}] addPlayer: 嘗試加入玩家 ${playerName} (房主: ${isHost})。目前房間内玩家數: ${this.players.length}`);
 
     const existingPlayerBySocketId = this.players.find(p => p.socketId === socket.id);
     if (existingPlayerBySocketId) {
@@ -273,8 +276,10 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
         this.broadcastGameState();
         this.resetEmptyRoomTimer();
 
-        // 重連時也加入語音聊天
-        this.handleVoiceChatJoin(socket);
+        // 重連時也加入語音聊天 (如果房間允許)
+        if (this.roomSettings.voiceEnabled) {
+            this.handleVoiceChatJoin(socket);
+        }
         return true;
     }
 
@@ -336,8 +341,10 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     this.broadcastGameState();
     this.resetEmptyRoomTimer();
 
-    // 新玩家加入房間後，處理語音聊天加入
-    this.handleVoiceChatJoin(socket);
+    // 新玩家加入房間後，處理語音聊天加入 (如果房間允許)
+    if (this.roomSettings.voiceEnabled) {
+        this.handleVoiceChatJoin(socket);
+    }
 
     console.info(`[GameRoom ${this.roomId}] 玩家 ${playerName} (ID: ${finalPlayerObject.id}) 加入流程完成。房間内物件總數: ${this.players.length}。在線真人數: ${this.players.filter(p=>p.isHuman && p.isOnline).length}。`);
     return true;
@@ -350,8 +357,10 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
     const removedPlayer = playerIndexInArray !== -1 ? this.players[playerIndexInArray] : null;
     console.info(`[GameRoom ${this.roomId}] 玩家 ${removedPlayer?.name || '未知'} (Socket: ${socketId}) 正在被移除。主動退出: ${isGracefulQuit}。遊戲階段: ${this.gameState.gamePhase}`);
 
-    // 處理語音聊天離開
-    this.handleVoiceChatLeave(socketId); // 無論玩家是否在 this.players 中找到，都嘗試從語音中移除
+    // 處理語音聊天離開 (如果房間允許語音)
+    if (this.roomSettings.voiceEnabled) {
+        this.handleVoiceChatLeave(socketId); 
+    }
 
     if (!removedPlayer) {
         console.warn(`[GameRoom ${this.roomId}] 嘗試移除玩家 (Socket: ${socketId})，但未在核心玩家列表中找到。`);
@@ -614,6 +623,11 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
 
   // --- 語音聊天處理 ---
   public handleVoiceChatJoin(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
+    if (!this.roomSettings.voiceEnabled) {
+        console.info(`[VoiceChat ${this.roomId}] 房間已禁用遊戲語音，${socket.data.playerName} (Socket: ${socket.id}) 的加入請求被忽略。`);
+        return;
+    }
+
     const player = this.players.find(p => p.socketId === socket.id);
     if (!player) {
       console.warn(`[VoiceChat ${this.roomId}] Socket ${socket.id} 請求加入語音但未找到對應玩家。`);
@@ -667,6 +681,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
   }
 
   public handleVoiceChatSignal(fromSocketId: string, data: { toSocketId: string; signal: any }): void {
+    if (!this.roomSettings.voiceEnabled) return;
     const recipientSocket = this.io.sockets.sockets.get(data.toSocketId);
     if (recipientSocket) {
       console.debug(`[VoiceChat ${this.roomId}] 轉發從 ${fromSocketId} 到 ${data.toSocketId} 的 WebRTC 信令。`);
@@ -677,6 +692,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
   }
 
   public handleVoiceChatToggleMute(socketId: string, data: { muted: boolean }): void {
+    if (!this.roomSettings.voiceEnabled) return;
     const participant = this.voiceParticipants.get(socketId);
     const playerSocket = this.io.sockets.sockets.get(socketId);
 
@@ -696,6 +712,7 @@ public addPlayer(socket: Socket<ClientToServerEvents, ServerToClientEvents, Inte
   }
 
   public handleVoiceChatSpeakingUpdate(socketId: string, data: { speaking: boolean }): void {
+    if (!this.roomSettings.voiceEnabled) return;
     const participant = this.voiceParticipants.get(socketId);
     if (participant) {
         // 更新 participant 內部狀態 (如果需要)

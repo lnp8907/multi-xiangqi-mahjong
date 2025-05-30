@@ -29,7 +29,7 @@ type GameView = 'home' | 'lobby' | 'game'; // 'home': 主頁, 'lobby': 大廳, '
 const env = (import.meta as any).env;
 // Socket.IO 伺服器的 URL，優先從環境變數讀取，若無則使用本地開發預設值
 // const SOCKET_SERVER_URL = env?.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
-const SOCKET_SERVER_URL = ""
+const SOCKET_SERVER_URL = "";
 
 // 定義通知物件的結構
 interface AppNotification {
@@ -54,6 +54,7 @@ const App: React.FC = () => {
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [clientPlayerId, setClientPlayerId] = useState<number | null>(null);
+  const clientPlayerIdRef = useRef<number | null>(null); 
   const [currentGameState, setCurrentGameState] = useState<GameState | null>(null);
   const [playerName, setPlayerName] = useState<string>(localStorage.getItem('xiangqiMahjongPlayerName') || "玩家");
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -81,8 +82,8 @@ const App: React.FC = () => {
   const remoteAudioStreamsRef = useRef<Record<string, MediaStream>>({});
   const [isMicrophoneMuted, setIsMicrophoneMuted] = useState<boolean>(false);
   const [isVoiceChatSupported, setIsVoiceChatSupported] = useState<boolean>(true);
-  const [playerSpeakingStates, setPlayerSpeakingStates] = useState<Record<string, boolean>>({}); // socketId -> isSpeaking
-  const [playerMutedStates, setPlayerMutedStates] = useState<Record<string, boolean>>({});    // socketId -> isMuted
+  const [playerSpeakingStates, setPlayerSpeakingStates] = useState<Record<string, boolean>>({}); 
+  const [playerMutedStates, setPlayerMutedStates] = useState<Record<string, boolean>>({});    
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
 
   // --- 通知管理函數 ---
@@ -95,8 +96,17 @@ const App: React.FC = () => {
     setNotifications(prevNotifications => prevNotifications.filter(n => n.id !== id));
   }, []);
 
+  useEffect(() => {
+    clientPlayerIdRef.current = clientPlayerId;
+  }, [clientPlayerId]);
+
   // --- WebRTC 初始化與清理 ---
-  const initializeWebRTC = useCallback(async (roomId: string) => {
+  const initializeWebRTC = useCallback(async (roomId: string, roomAllowsVoice: boolean) => {
+    if (!roomAllowsVoice) {
+      console.log(`[App.tsx] 房間 ${roomId} 已禁用遊戲語音，不初始化 WebRTC。`);
+      setIsVoiceChatSupported(false); // 雖然瀏覽器可能支持，但房間不允許
+      return;
+    }
     if (!socketRef.current) {
         addNotification("Socket 未連接，無法初始化語音聊天。", "error");
         return;
@@ -109,9 +119,9 @@ const App: React.FC = () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         setLocalAudioStream(stream);
-        setIsVoiceChatSupported(true); // 確認支援麥克風
+        setIsVoiceChatSupported(true); 
 
-        const manager = new WebRTCManager(socketRef.current, stream, roomId, clientPlayerId || -1, addNotification);
+        const manager = new WebRTCManager(socketRef.current, stream, roomId, clientPlayerIdRef.current || -1, addNotification);
         webRTCManagerRef.current = manager;
 
         manager.onRemoteStreamAdded = (socketId, remoteStream) => {
@@ -122,7 +132,7 @@ const App: React.FC = () => {
                 audioElement.srcObject = remoteStream;
                 audioElement.autoplay = true;
                 audioElementsRef.current[socketId] = audioElement;
-                document.body.appendChild(audioElement);
+                document.body.appendChild(audioElement); // 考慮更合適的掛載點
                 console.log(`[App.tsx] 為 ${socketId} 創建並播放 Audio 元素。`);
             } else {
                  audioElementsRef.current[socketId].srcObject = remoteStream;
@@ -146,10 +156,23 @@ const App: React.FC = () => {
         manager.onPlayerMuted = (socketId, muted) => {
             setPlayerMutedStates(prev => ({ ...prev, [socketId]: muted }));
         };
+        // 新增：處理 WebRTC ICE 連接失敗的回調
+        manager.onIceConnectionFailed = (failedPeerSocketId: string, failedPlayerId: number) => {
+            console.log(`[App.tsx] WebRTC ICE connection failed for player ID ${failedPlayerId} (Socket: ${failedPeerSocketId}).`);
+            const playerInGameState = currentGameState?.players.find(p => p.id === failedPlayerId);
+
+            if (!playerInGameState || (playerInGameState.isHuman && !playerInGameState.isOnline)) {
+                console.log(`[App.tsx] 抑制 WebRTC 斷線通知給玩家 ${failedPlayerId}，因為他們已被伺服器標記為離開/離線。`);
+            } else {
+                const nameToDisplay = playerInGameState?.name || `玩家 ${failedPlayerId}`;
+                addNotification(`${nameToDisplay} 的語音連接出現問題或已斷開。`, 'warning');
+            }
+        };
+
 
         socketRef.current.emit('voiceChatJoinRoom', { roomId });
         console.log(`[App.tsx] WebRTC 初始化完成，已加入房間 ${roomId} 的語音聊天。`);
-        if (isMicrophoneMuted) { // 如果進入時是靜音狀態，則主動靜音流
+        if (isMicrophoneMuted) { 
             webRTCManagerRef.current.toggleMute(true);
         }
 
@@ -159,7 +182,7 @@ const App: React.FC = () => {
         setIsVoiceChatSupported(false);
         setLocalAudioStream(null);
     }
-  }, [clientPlayerId, addNotification, isMicrophoneMuted]);
+  }, [addNotification, isMicrophoneMuted, currentGameState]); // 將 currentGameState 加入依賴項以供 onIceConnectionFailed 使用
 
   const cleanupWebRTC = useCallback(() => {
     if (webRTCManagerRef.current) {
@@ -195,7 +218,7 @@ const App: React.FC = () => {
     } else {
       if (socketRef.current) {
         console.log('[App.tsx] 因視圖為 home 或 playerName 未設定，斷開 socket 連接。');
-        cleanupWebRTC(); // 斷開 socket 時清理 WebRTC
+        cleanupWebRTC(); 
         socketRef.current.disconnect();
         socketRef.current = null;
         setSocket(null);
@@ -205,7 +228,7 @@ const App: React.FC = () => {
     return () => {
       if (socketRef.current && (currentView === 'home' || !playerName)) {
         console.log('[App.tsx] 從主要連接 effect 清理 socket 連接。');
-        cleanupWebRTC(); // 清理 WebRTC
+        cleanupWebRTC(); 
         socketRef.current.disconnect();
         socketRef.current = null;
         setSocket(null);
@@ -243,7 +266,7 @@ const App: React.FC = () => {
       console.warn('[App.tsx] Socket.IO 連接斷開:', reason);
       setIsConnected(false);
       setIsLoading(false);
-      cleanupWebRTC(); // Socket 斷線時清理 WebRTC
+      cleanupWebRTC(); 
       addNotification('與伺服器斷線，請檢查網路連線或重新整理頁面。', 'error');
     };
 
@@ -260,33 +283,42 @@ const App: React.FC = () => {
     const onJoinedRoom = (data: { gameState: GameState; roomId: string; clientPlayerId: number }) => {
       console.log('[App.tsx] 成功加入房間，收到數據:', data);
       setCurrentRoomId(data.roomId);
-      setClientPlayerId(data.clientPlayerId);
+      setClientPlayerId(data.clientPlayerId); 
       setCurrentGameState(data.gameState);
       setCurrentView('game');
       setIsLoading(false);
-      initializeWebRTC(data.roomId); // 加入房間後初始化 WebRTC
+      // 檢查房間是否允許語音，然後初始化 WebRTC
+      const roomAllowsVoice = data.gameState.voiceEnabled === undefined ? true : data.gameState.voiceEnabled;
+      initializeWebRTC(data.roomId, roomAllowsVoice); 
     };
 
     const onGameStateUpdate = (updatedGameState: GameState) => {
         setCurrentGameState(prevGameState => {
-            if (!prevGameState) return updatedGameState;
+            if (!prevGameState && !updatedGameState) return null; // 如果兩者都為 null
+            if (!updatedGameState) return prevGameState; // 如果新狀態為 null，保留舊狀態 (理論上不應發生)
+            if (!prevGameState && updatedGameState) return updatedGameState; // 如果舊狀態為 null，直接用新狀態
 
-            const updatedPlayers = updatedGameState.players.map(player => {
-                const playerSocketId = player.socketId || player.id.toString(); // 備用 ID
-                const speaking = playerSpeakingStates[playerSocketId] || false;
-                const muted = (player.id === clientPlayerId)
+            // 確保 prevGameState.players 存在
+            const basePlayers = prevGameState?.players || updatedGameState.players || [];
+
+            const newPlayersArray = updatedGameState.players.map(updPlayer => {
+                const speaking = playerSpeakingStates[updPlayer.socketId || updPlayer.id.toString()] ?? updPlayer.isSpeaking ?? false;
+                const muted = (updPlayer.id === clientPlayerIdRef.current)
                               ? isMicrophoneMuted
-                              : (playerMutedStates[playerSocketId] || false);
-                return { ...player, isSpeaking: speaking, isMuted: muted };
+                              : (playerMutedStates[updPlayer.socketId || updPlayer.id.toString()] ?? updPlayer.isMuted ?? false);
+                return { ...updPlayer, isSpeaking: speaking, isMuted: muted };
             });
-            return { ...updatedGameState, players: updatedPlayers };
+            return { ...updatedGameState, players: newPlayersArray };
         });
     };
 
 
     const onGamePlayerLeft = (data: { playerId: number; newHostId?: number; message?: string }) => {
+      if (data.playerId === clientPlayerIdRef.current && currentRoomId === null) {
+        console.log("[App.tsx] 收到關於自己離開的 gamePlayerLeft 事件，但已主動退出，抑制重複通知。");
+        return;
+      }
       if(data.message) addNotification(data.message, 'info');
-      // WebRTCManager 會透過 voiceChatUserLeft 間接處理
     };
 
     const onGameError = (message: string) => {
@@ -294,7 +326,7 @@ const App: React.FC = () => {
         setIsLoading(false);
         return;
       }
-      addNotification(`遊戲錯誤: ${message}`, 'error');
+      addNotification(`來自伺服器的遊戲錯誤: ${message}`, 'error');
       setIsLoading(false);
     };
 
@@ -303,11 +335,12 @@ const App: React.FC = () => {
       setIsLoading(false);
     };
 
-    // --- WebRTC Socket 事件處理 ---
     const handleVoiceSignal = (data: { fromSocketId: string; signal: any }) => {
+        if(currentGameState?.voiceEnabled === false) return; // 如果房間禁用遊戲語音，忽略信令
         webRTCManagerRef.current?.handleIncomingSignal(data.fromSocketId, data.signal);
     };
     const handleVoiceChatUserList = (data: { users: VoiceChatUser[] }) => {
+        if(currentGameState?.voiceEnabled === false) return;
         webRTCManagerRef.current?.connectToExistingPeers(data.users);
         const initialMutedStates: Record<string, boolean> = {};
         data.users.forEach(user => {
@@ -316,18 +349,22 @@ const App: React.FC = () => {
         setPlayerMutedStates(prev => ({ ...prev, ...initialMutedStates }));
     };
     const handleVoiceChatUserJoined = (userData: VoiceChatUser) => {
+        if(currentGameState?.voiceEnabled === false) return;
         webRTCManagerRef.current?.connectToNewPeer(userData.socketId, userData.playerName, userData.playerId, userData.isMuted);
         setPlayerMutedStates(prev => ({...prev, [userData.socketId]: userData.isMuted}));
     };
     const handleVoiceChatUserLeft = (data: { socketId: string }) => {
+        if(currentGameState?.voiceEnabled === false) return;
         webRTCManagerRef.current?.handlePeerDisconnect(data.socketId);
         setPlayerSpeakingStates(prev => { const s = {...prev}; delete s[data.socketId]; return s; });
         setPlayerMutedStates(prev => { const s = {...prev}; delete s[data.socketId]; return s; });
     };
      const handleVoiceChatUserMuted = (data: { socketId: string; muted: boolean }) => {
+        if(currentGameState?.voiceEnabled === false) return;
         setPlayerMutedStates(prev => ({...prev, [data.socketId]: data.muted}));
     };
      const handleVoiceChatUserSpeaking = (data: { socketId: string; speaking: boolean }) => {
+        if(currentGameState?.voiceEnabled === false) return;
         setPlayerSpeakingStates(prev => ({...prev, [data.socketId]: data.speaking}));
     };
 
@@ -342,7 +379,6 @@ const App: React.FC = () => {
     socket.on('gameError', onGameError);
     socket.on('lobbyError', onLobbyError);
 
-    // WebRTC events
     socket.on('voiceSignal', handleVoiceSignal);
     socket.on('voiceChatUserList', handleVoiceChatUserList);
     socket.on('voiceChatUserJoined', handleVoiceChatUserJoined);
@@ -362,7 +398,6 @@ const App: React.FC = () => {
       socket.off('gameError', onGameError);
       socket.off('lobbyError', onLobbyError);
 
-      // WebRTC events
       socket.off('voiceSignal', handleVoiceSignal);
       socket.off('voiceChatUserList', handleVoiceChatUserList);
       socket.off('voiceChatUserJoined', handleVoiceChatUserJoined);
@@ -370,7 +405,7 @@ const App: React.FC = () => {
       socket.off('voiceChatUserMuted', handleVoiceChatUserMuted);
       socket.off('voiceChatUserSpeaking', handleVoiceChatUserSpeaking);
     };
-  }, [socket, currentView, clientPlayerId, playerName, currentRoomId, addNotification, initializeWebRTC, cleanupWebRTC, isMicrophoneMuted]);
+  }, [socket, currentView, playerName, currentRoomId, addNotification, initializeWebRTC, cleanupWebRTC, isMicrophoneMuted, playerMutedStates, playerSpeakingStates, currentGameState]); 
 
 
   // --- 副作用處理 (useEffect) ---
@@ -390,13 +425,13 @@ const App: React.FC = () => {
   }, [isSoundEffectsEnabled, soundEffectsVolume]);
 
     useEffect(() => {
-        if (currentGameState) {
+        if (currentGameState && currentGameState.players) { // 確保 currentGameState 和 players 存在
             setCurrentGameState(prevGameState => {
-                if (!prevGameState) return null;
+                if (!prevGameState || !prevGameState.players) return prevGameState; // 再次檢查 prevGameState
                 const updatedPlayers = prevGameState.players.map(player => {
                     const playerSocketId = player.socketId || player.id.toString();
                     const speaking = playerSpeakingStates[playerSocketId] ?? player.isSpeaking ?? false;
-                    const muted = (player.id === clientPlayerId)
+                    const muted = (player.id === clientPlayerIdRef.current)
                                   ? isMicrophoneMuted
                                   : (playerMutedStates[playerSocketId] ?? player.isMuted ?? false);
                     if (player.isSpeaking !== speaking || player.isMuted !== muted) {
@@ -411,7 +446,7 @@ const App: React.FC = () => {
                 return prevGameState;
             });
         }
-    }, [playerSpeakingStates, playerMutedStates, clientPlayerId, isMicrophoneMuted, currentGameState?.players.length]); // 確保依賴 gameState.players.length
+    }, [playerSpeakingStates, playerMutedStates, isMicrophoneMuted, currentGameState?.players?.length]);
 
 
   // --- 事件處理函數 ---
@@ -422,17 +457,20 @@ const App: React.FC = () => {
   const handleSoundEffectsVolumeChange = (newVolume: number) => setSoundEffectsVolume(newVolume);
 
   const handleToggleMute = useCallback(() => {
-    if (webRTCManagerRef.current && localAudioStream) {
+    if (webRTCManagerRef.current && localAudioStream && currentGameState?.voiceEnabled) {
         const newMutedState = !isMicrophoneMuted;
         webRTCManagerRef.current.toggleMute(newMutedState);
         setIsMicrophoneMuted(newMutedState);
         if (socketRef.current) {
             socketRef.current.emit('voiceChatToggleMute', { muted: newMutedState });
         }
-    } else {
+    } else if (!currentGameState?.voiceEnabled){
+        addNotification("此房間已禁用遊戲語音。", "info");
+    }
+     else {
         addNotification(localAudioStream ? "語音聊天尚未完全連接。" : "麥克風未啟用或未授權。", "warning");
     }
-  }, [isMicrophoneMuted, localAudioStream, addNotification]);
+  }, [isMicrophoneMuted, localAudioStream, addNotification, currentGameState?.voiceEnabled]);
 
 
   const handleEnterLobby = useCallback((name: string) => {
@@ -463,7 +501,8 @@ const App: React.FC = () => {
 
     const roomCreationDataWithPlayerName = {
         ...settingsFromModal,
-        playerName: playerName,
+        playerName: playerName, // playerName 由 App.tsx 維護
+        // voiceEnabled 已經包含在 settingsFromModal 中
     };
 
     socketRef.current.emit('lobbyCreateRoom', roomCreationDataWithPlayerName, (ack) => {
@@ -522,14 +561,14 @@ const App: React.FC = () => {
   }, [isConnected, attemptingToJoinRoomDetails, playerName, addNotification]);
 
   const handleQuitGame = useCallback(() => {
-    cleanupWebRTC(); // 退出遊戲時清理 WebRTC
+    cleanupWebRTC(); 
     if (socketRef.current && currentRoomId) {
       socketRef.current.emit('gameQuitRoom', currentRoomId);
       console.log(`[App.tsx] 玩家 ${playerName} 請求退出房間 ${currentRoomId}。`);
     }
-    setCurrentRoomId(null);
+    setCurrentRoomId(null); 
     setCurrentGameState(null);
-    setClientPlayerId(null);
+    setClientPlayerId(null); 
     setCurrentView('lobby');
     if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit('userSetName', playerName, (ack) => {
@@ -571,7 +610,7 @@ const App: React.FC = () => {
           </div>
         );
       case 'game':
-        return currentGameState && socket && clientPlayerId !== null ? (
+        return currentGameState && socket && clientPlayerIdRef.current !== null ? (
           <GameBoard
             roomSettings={{
               id: currentGameState.roomId!,
@@ -581,9 +620,10 @@ const App: React.FC = () => {
               fillWithAI: currentGameState.configuredFillWithAI,
               hostName: currentGameState.hostPlayerName,
               numberOfRounds: currentGameState.numberOfRounds,
+              voiceEnabled: currentGameState.voiceEnabled === undefined ? true : currentGameState.voiceEnabled, // 確保 voiceEnabled 傳遞
             }}
             initialGameState={currentGameState}
-            clientPlayerId={clientPlayerId}
+            clientPlayerId={clientPlayerIdRef.current} 
             onQuitGame={handleQuitGame}
             toggleSettingsPanel={() => setShowSettingsPanel(prev => !prev)}
             socket={socket}

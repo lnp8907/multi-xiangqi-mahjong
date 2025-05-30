@@ -1,3 +1,4 @@
+
 // 引入 Socket.IO 相關類型
 import { Server, Socket } from 'socket.io';
 // 引入遊戲房間類別
@@ -31,7 +32,7 @@ export class RoomManager {
    * @param {(ack: { success: boolean; roomId?: string; message?: string }) => void} [callback] - 操作完成後的回調函數 (變為可選)。
    */
   public createRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
-                    clientSettings: Omit<ClientRoomSettingsData, 'maxPlayers'> & { playerName: string }, 
+                    clientSettings: Omit<ClientRoomSettingsData, 'maxPlayers' | 'playerName'> & { playerName: string, voiceEnabled?: boolean }, 
                     callback?: (ack: { success: boolean; roomId?: string; message?: string }) => void): void { // callback 變為可選
     
     // 獲取房主名稱，優先使用客戶端提交的，其次是 socket.data 中的，最後是預設名稱
@@ -70,6 +71,7 @@ export class RoomManager {
       fillWithAI: clientSettings.fillWithAI,
       password: clientSettings.password ? clientSettings.password.trim() : undefined, // 密碼可選
       numberOfRounds: clientSettings.numberOfRounds || DEFAULT_NUMBER_OF_ROUNDS, // 局數，若未提供則使用預設值
+      voiceEnabled: clientSettings.voiceEnabled === undefined ? true : clientSettings.voiceEnabled, // 新增：語音是否啟用，預設為 true
       id: roomId,
       hostName: hostNameFromClient, // 房主名稱
       hostSocketId: socket.id, // 房主 Socket ID
@@ -81,7 +83,7 @@ export class RoomManager {
     const gameRoom = new GameRoom(roomId, fullRoomSettings, this.io, () => this.removeRoom(roomId));
     this.rooms.set(roomId, gameRoom); // 將房間加入到管理列表
 
-    console.info(`[RoomManager] 玩家 ${hostNameFromClient} (Socket: ${socket.id}) 創建房間: ${fullRoomSettings.roomName} (ID: ${roomId})`); // Log level adjusted
+    console.info(`[RoomManager] 玩家 ${hostNameFromClient} (Socket: ${socket.id}) 創建房間: ${fullRoomSettings.roomName} (ID: ${roomId})，語音: ${fullRoomSettings.voiceEnabled}`); // Log level adjusted
     
     socket.leave(LOBBY_ROOM_NAME); // 讓創建者離開大廳
     console.info(`[RoomManager] Socket ${socket.id} 已離開 '${LOBBY_ROOM_NAME}' 群組，加入遊戲房間 ${roomId}。`); // Log level adjusted
@@ -166,7 +168,7 @@ export class RoomManager {
     if (room) { // 如果房間存在
       const playerName = socket.data.playerName || `Socket ${socket.id}`;
       console.info(`[RoomManager] 玩家 ${playerName} 請求離開房間: ${roomId}`); // Log level adjusted
-      room.removePlayer(socket.id); // 從遊戲房間移除玩家
+      room.removePlayer(socket.id, true); // 從遊戲房間移除玩家, isGracefulQuit = true
       socket.join(LOBBY_ROOM_NAME); // 讓玩家加入大廳
       console.info(`[RoomManager] Socket ${socket.id} 已重新加入 '${LOBBY_ROOM_NAME}' 群組。`); // Log level adjusted
       this.broadcastLobbyUpdate(); // 廣播大廳更新
@@ -184,7 +186,7 @@ export class RoomManager {
         if (room && room.hasPlayer(socket.id)) { // 如果房間存在且玩家確實屬於該房間
             const playerName = socket.data.playerName || `Socket ${socket.id}`;
             console.info(`[RoomManager] 偵測到玩家 ${playerName} (Socket: ${socket.id}) 斷線，將從房間 ${room.getSettings().roomName} 處理。`); // Log level adjusted
-            room.removePlayer(socket.id); // 從遊戲房間移除玩家 (GameRoom內部會處理離線邏輯)
+            room.removePlayer(socket.id, false); // 從遊戲房間移除玩家 (GameRoom內部會處理離線邏輯), isGracefulQuit = false
             this.broadcastLobbyUpdate(); // 廣播大廳更新
         }
     } else { // 如果玩家斷線時不在任何遊戲房間內 (可能在大廳)
@@ -222,6 +224,7 @@ export class RoomManager {
         passwordProtected: !!settings.password, // 是否有密碼保護
         numberOfRounds: settings.numberOfRounds, // 總局數
         hostName: settings.hostName, // 房主名稱
+        voiceEnabled: settings.voiceEnabled, // 新增：房間是否允許語音
       });
     });
     return lobbyData;
