@@ -89,6 +89,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [localChiOptionsForClient, setLocalChiOptionsForClient] = useState<Tile[][] | null>(null);
   const hasAutoDrawnThisTurnRef = useRef(false);
   const [showFinalMatchResultsModalStep, setShowFinalMatchResultsModalStep] = useState<'roundResult' | 'finalScore'>('roundResult');
+  // 新增狀態：追蹤哪個 AI 玩家正在模擬摸牌
+  const [simulatingDrawForAIPlayerId, setSimulatingDrawForAIPlayerId] = useState<number | null>(null);
 
 
   useEffect(() => {
@@ -99,6 +101,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setLocalChiOptionsForClient(null);
     hasAutoDrawnThisTurnRef.current = false;
     setShowFinalMatchResultsModalStep('roundResult');
+    setSimulatingDrawForAIPlayerId(null); // 初始化或重置時清除
     console.log(`[GameBoard] Initial game state updated for room ${initialGameState.roomId}, round ${initialGameState.currentRound}. Voice Enabled: ${initialGameState.voiceEnabled}`);
   }, [initialGameState.roomId, initialGameState.currentRound, initialGameState.voiceEnabled]);
 
@@ -116,6 +119,18 @@ const GameBoard: React.FC<GameBoardProps> = ({
       if (newGameState.gamePhase === GamePhase.AWAITING_REMATCH_VOTES && newGameState.matchOver &&
           gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES) {
           setShowFinalMatchResultsModalStep('roundResult');
+      }
+
+      // AI 摸牌模擬邏輯
+      const currentPlayerForSim = newGameState.players[newGameState.currentPlayerIndex];
+      if (newGameState.gamePhase === GamePhase.PLAYER_TURN_START &&
+          currentPlayerForSim &&
+          (!currentPlayerForSim.isHuman || !currentPlayerForSim.isOnline)) {
+        setSimulatingDrawForAIPlayerId(newGameState.currentPlayerIndex);
+      } else if (simulatingDrawForAIPlayerId !== null &&
+                 (newGameState.gamePhase !== GamePhase.PLAYER_TURN_START || newGameState.currentPlayerIndex !== simulatingDrawForAIPlayerId)) {
+        // 如果階段改變，或不再是同一個 AI 玩家的回合開始，則清除模擬狀態
+        setSimulatingDrawForAIPlayerId(null);
       }
     };
 
@@ -191,7 +206,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
       socket.off('actionAnnouncement', handleActionAnnouncement as (data: any) => void);
       socket.off('availableClaimsNotification', handleAvailableClaimsNotification);
     };
-  }, [socket, TILE_KIND_ENUM_VALUES, clientPlayerId, isSelectingChiCombo, gameState.gamePhase]);
+  }, [socket, TILE_KIND_ENUM_VALUES, clientPlayerId, isSelectingChiCombo, gameState.gamePhase, simulatingDrawForAIPlayerId]);
 
   const humanPlayer = gameState.players.find(p => p.id === clientPlayerId && p.isHuman);
   const currentPlayer = gameState.players.length > 0 ? gameState.players[gameState.currentPlayerIndex] : null;
@@ -368,6 +383,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
     if (!targetPlayerToDisplay) {
          return <div className={`p-2 rounded-lg shadow-inner bg-slate-700/30 min-h-[100px] w-full flex items-center justify-center text-slate-500 text-xs`}>玩家席位 (錯誤)</div>;
     }
+    
+    // 判斷是否輪到此玩家，且該玩家已摸牌或正在等待出牌 (表示其手中持有最近摸到的牌)
+    const isPlayerTurnAndHoldingDrawnTile =
+        targetPlayerToDisplay.id === gameState.currentPlayerIndex &&
+        gameState.lastDrawnTile !== null &&
+        (gameState.gamePhase === GamePhase.PLAYER_DRAWN || 
+         (gameState.gamePhase === GamePhase.AWAITING_DISCARD && gameState.lastDrawnTile !== null)); // 放寬條件：即使在AWAITING_DISCARD，如果lastDrawnTile存在也算
+
+    // 取得該玩家摸到的牌 (如果適用)
+    const drawnTileForThisPlayer = isPlayerTurnAndHoldingDrawnTile ? gameState.lastDrawnTile : null;
+
     return (
       <PlayerDisplay
         player={targetPlayerToDisplay}
@@ -382,6 +408,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
         selectedTileId={playerDisplayPosition === 'bottom' ? selectedTileId : null}
         position={playerDisplayPosition}
         gamePhase={gameState.gamePhase}
+        lastDrawnTileForPlayer={drawnTileForThisPlayer} 
+        isPlayerTurnAndDrawn={isPlayerTurnAndHoldingDrawnTile} 
+        isSimulatingDraw={targetPlayerToDisplay.id === simulatingDrawForAIPlayerId} // 新增 prop
       />
     );
   };
@@ -543,7 +572,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         <ActionAnnouncer key={ann.id} announcement={ann} />
       ))}
 
-      {/* MODIFIED: 移除 gameState.gamePhase !== GamePhase.AWAITING_REMATCH_VOTES 條件 */}
       {gameState.gamePhase !== GamePhase.WAITING_FOR_PLAYERS && (
         <>
           <div className="col-start-2 row-start-1 flex">
@@ -557,6 +585,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
           </div>
           <div className="col-start-2 row-start-3 flex flex-row items-stretch">
             {renderPlayer('bottom')}
+            {/* 底部玩家的摸牌區，單獨處理在手牌右側 */}
             {humanPlayer &&
                 currentPlayer?.id === humanPlayer.id &&
                 gameState.gamePhase === GamePhase.PLAYER_DRAWN &&

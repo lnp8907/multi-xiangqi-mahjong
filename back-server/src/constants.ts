@@ -72,9 +72,9 @@ export const CLAIM_DECISION_TIMEOUT_SECONDS = 30;
 /** @description 玩家回合內行動的思考/行動時間 (秒)。 */
 export const PLAYER_TURN_ACTION_TIMEOUT_SECONDS = 30; 
 /** @description AI 思考時間的最小值 (毫秒)。 */
-export const AI_THINK_TIME_MS_MIN = 100; 
+export const AI_THINK_TIME_MS_MIN = 1000; 
 /** @description AI 思考時間的最大值 (毫秒)。 */
-export const AI_THINK_TIME_MS_MAX = 3000; 
+export const AI_THINK_TIME_MS_MAX = 2000; 
 /** @description 計時器更新間隔 (毫秒)，例如每秒更新一次。 */
 export const ACTION_TIMER_INTERVAL_MS = 1000;
 /** @description 空房間自動關閉的超時時間 (毫秒)，例如 5 分鐘。 */
@@ -82,7 +82,7 @@ export const EMPTY_ROOM_TIMEOUT_MS = 1 * 60 * 1000;
 /** @description 遊戲結束後，若房間變空，則在此超時後關閉房間 (毫秒)，例如 1 分鐘。 */
 export const GAME_END_EMPTY_ROOM_TIMEOUT_MS = 1 * 60 * 1000; 
 /** @description 下一局開始倒數秒數。GameState 中的 nextRoundCountdown 以秒為單位。 */
-export const NEXT_ROUND_COUNTDOWN_SECONDS = 10; 
+export const NEXT_ROUND_COUNTDOWN_SECONDS = 20; 
 /** @description 再戰投票的超時時間 (秒)。 */
 export const REMATCH_VOTE_TIMEOUT_SECONDS = 20;
 /** @description 全局單局最大持續時間 (秒)，例如 5 分鐘。 */

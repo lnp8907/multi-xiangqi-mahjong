@@ -24,6 +24,12 @@ interface PlayerDisplayProps {
   position: 'bottom' | 'left' | 'top' | 'right';
   /** @param {GamePhase} gamePhase - 當前的遊戲階段。 */
   gamePhase: GamePhase;
+  /** @param {Tile | null} lastDrawnTileForPlayer - 特定玩家摸到的牌。*/
+  lastDrawnTileForPlayer: Tile | null;
+  /** @param {boolean} isPlayerTurnAndDrawn - 是否輪到此玩家且已摸牌。*/
+  isPlayerTurnAndDrawn: boolean;
+  /** @param {boolean} [isSimulatingDraw] - 是否正在為此 AI 玩家模擬摸牌動畫。 */
+  isSimulatingDraw?: boolean;
 }
 
 /**
@@ -39,12 +45,15 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
   selectedTileId,
   position,
   gamePhase,
+  lastDrawnTileForPlayer,
+  isPlayerTurnAndDrawn,
+  isSimulatingDraw, // 新增 prop
 }) => {
   const handLayoutClasses = {
     bottom: 'flex-row space-x-1 justify-center',
-    left: 'flex-col -space-y-7 items-center',
+    left: 'flex-col -space-y-7 items-center', // 手牌內部堆疊
     top: 'flex-row-reverse space-x-1 space-x-reverse justify-center',
-    right: 'flex-col-reverse -space-y-7 space-y-reverse items-center',
+    right: 'flex-col-reverse -space-y-7 space-y-reverse items-center', // 手牌內部堆疊
   };
 
   const meldsContainerLayoutClasses = {
@@ -75,8 +84,8 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
       if (group === 0) return 3;
       return 4;
     };
-    if (detailsA.group !== detailsB.group) { // 注意：此處原文有誤，應為 detailsA.group !== detailsB.group
-      return groupOrderValue(detailsA.group) - groupOrderValue(detailsB.group); // 修正為 groupOrderValue(detailsB.group)
+    if (detailsA.group !== detailsB.group) { 
+      return groupOrderValue(detailsA.group) - groupOrderValue(detailsB.group); 
     }
     return detailsB.orderValue - detailsA.orderValue;
   });
@@ -108,41 +117,102 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
                          gamePhase === GamePhase.GAME_OVER ||
                          gamePhase === GamePhase.ROUND_OVER ||
                          gamePhase === GamePhase.AWAITING_REMATCH_VOTES;
+    
     const handToDisplay = showRealHand ? sortedHand : Array.from({ length: player.hand?.length || 0 }).map((_, idx) => `hidden-${player.id}-${idx}`);
 
-    const handDisplay = (
+    const handDisplayElements = handToDisplay.map((item) => {
+      const tile = showRealHand ? item as Tile : null;
+      const key = showRealHand ? (item as Tile).id : item as string;
+
+      const tileElement = (
+        <TileDisplay
+          key={key}
+          tile={tile}
+          onClick={showRealHand && isHumanPlayerView && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom' ? onTileClick : undefined}
+          isSelected={showRealHand && isHumanPlayerView && tile?.id === selectedTileId && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom'}
+          size="medium"
+          isHidden={!showRealHand}
+          characterOrientation={tileCharOrientation}
+        />
+      );
+
+      if (position === 'left') {
+        return <div key={`${key}-wrapper`} className="transform rotate-90 origin-center mx-10 flex-shrink-0">{tileElement}</div>;
+      }
+      if (position === 'right') {
+        return <div key={`${key}-wrapper`} className="transform -rotate-90 origin-center mx-10 flex-shrink-0">{tileElement}</div>;
+      }
+      if (position === 'top') {
+        return <div key={`${key}-wrapper`} className="transform rotate-180 origin-center m-0 flex-shrink-0">{tileElement}</div>;
+      }
+      return <div key={`${key}-wrapper`} className="m-0.5 flex-shrink-0">{tileElement}</div>;
+    });
+    
+    // 手牌區塊
+    const handDisplayContainer = (
       <div className={`flex ${handLayoutClasses[position]} justify-center min-h-[76px] relative z-0`}>
-        {handToDisplay.map((item) => {
-          const tile = showRealHand ? item as Tile : null;
-          const key = showRealHand ? (item as Tile).id : item as string;
-
-          const tileElement = (
-            <TileDisplay
-              key={key}
-              tile={tile}
-              onClick={showRealHand && isHumanPlayerView && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom' ? onTileClick : undefined}
-              isSelected={showRealHand && isHumanPlayerView && tile?.id === selectedTileId && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER && gamePhase !== GamePhase.AWAITING_REMATCH_VOTES && position === 'bottom'}
-              size="medium"
-              isHidden={!showRealHand}
-              characterOrientation={tileCharOrientation}
-            />
-          );
-
-          if (position === 'left') {
-            return <div key={`${key}-wrapper`} className="transform rotate-90 origin-center mt-0 mx-10 flex-shrink-0">{tileElement}</div>;
-          }
-          if (position === 'right') {
-            return <div key={`${key}-wrapper`} className="transform -rotate-90 origin-center mt-0 mx-10 flex-shrink-0">{tileElement}</div>;
-          }
-          if (position === 'top') {
-            return <div key={`${key}-wrapper`} className="transform rotate-180 origin-center m-0 flex-shrink-0">{tileElement}</div>;
-          }
-          return <div key={`${key}-wrapper`} className="m-0.5 flex-shrink-0">{tileElement}</div>;
-        })}
+        {handDisplayElements}
       </div>
     );
+    
+    // 摸牌區塊
+    let drawnTileDisplayElement: JSX.Element | null = null;
+    // 優先處理 AI 摸牌模擬
+    if (isSimulatingDraw && position !== 'bottom') {
+        const tileElement = (
+            <TileDisplay
+                key={`simulated-draw-${player.id}`}
+                tile={null} 
+                size="medium"
+                characterOrientation={tileCharOrientation}
+                isHidden={true} 
+            />
+        );
+        let tileRotationWrapper: JSX.Element = tileElement;
+        if (position === 'left') {
+            tileRotationWrapper = <div className="transform rotate-90 origin-center">{tileElement}</div>;
+        } else if (position === 'right') {
+            tileRotationWrapper = <div className="transform -rotate-90 origin-center">{tileElement}</div>;
+        } else if (position === 'top') {
+            tileRotationWrapper = <div className="transform rotate-180 origin-center">{tileElement}</div>;
+        }
+        drawnTileDisplayElement = (
+            <div className="flex-shrink-0 flex items-center justify-center">
+                {tileRotationWrapper}
+            </div>
+        );
+    }
+    // 如果不是 AI 摸牌模擬，則顯示實際摸到的牌 (對於非底部玩家，強制顯示牌背)
+    else if (isPlayerTurnAndDrawn && lastDrawnTileForPlayer && position !== 'bottom') {
+        const tileElement = (
+            <TileDisplay
+                key={`drawn-${lastDrawnTileForPlayer.id}`}
+                tile={lastDrawnTileForPlayer}
+                size="medium"
+                characterOrientation={tileCharOrientation}
+                isHidden={true} // 強制顯示牌背給其他玩家
+            />
+        );
+        
+        let tileRotationWrapper: JSX.Element = tileElement;
+        if (position === 'left') {
+            tileRotationWrapper = <div className="transform rotate-90 origin-center">{tileElement}</div>;
+        } else if (position === 'right') {
+            tileRotationWrapper = <div className="transform -rotate-90 origin-center">{tileElement}</div>;
+        } else if (position === 'top') {
+            tileRotationWrapper = <div className="transform rotate-180 origin-center">{tileElement}</div>;
+        }
+        
+        drawnTileDisplayElement = (
+            <div className="flex-shrink-0 flex items-center justify-center">
+                {tileRotationWrapper}
+            </div>
+        );
+    }
 
-    const meldsDisplay = player.melds.length > 0 && (
+
+    // 面子區塊
+    const meldsDisplay = player.melds.length > 0 ? (
       <div className={`flex ${meldsContainerLayoutClasses[position]} justify-center`}>
         {player.melds.map((meld) => {
           let oneMeldLayoutClass = "space-x-0.5";
@@ -156,13 +226,15 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
           }
 
           let displayTiles = [...meld.tiles];
+          // 如果是吃牌形成的順子，且被吃的牌存在，嘗試將其放在中間
           if (meld.designation === MeldDesignation.SHUNZI && meld.claimedTileId && displayTiles.length === 3) {
             const claimedIndex = displayTiles.findIndex(t => t.id === meld.claimedTileId);
-            if (claimedIndex !== -1 && claimedIndex !== 1) {
+            if (claimedIndex !== -1 && claimedIndex !== 1) { // 如果被吃的牌不在中間
               const claimedTile = displayTiles.splice(claimedIndex, 1)[0];
-              displayTiles.splice(1, 0, claimedTile);
+              displayTiles.splice(1, 0, claimedTile); // 插入到中間位置
             }
           }
+
 
           return (
             <div key={meld.id} className={`flex ${oneMeldLayoutClass} p-0.5 bg-slate-600/50 rounded`}>
@@ -173,7 +245,7 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
                     tile={tile}
                     size="small"
                     isRevealedMeld
-                    characterOrientation={tileCharOrientation}
+                    characterOrientation={(position === 'left' || position === 'right') ? 'vertical' : tileCharOrientation}
                     isHidden={false}
                   />
                 );
@@ -193,21 +265,56 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
           );
         })}
       </div>
-    );
+    ) : null; // 如果沒有面子，則 meldsDisplay 為 null
 
     const scrollableClasses = "overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800";
+    const mainContentContainerClasses = `${scrollableClasses} flex items-center justify-center w-full h-full p-1`;
+
+    // 牌的寬度約 w-12 (3rem / 48px)，高度約 h-[72px] (4.5rem / 72px)
+    const tileWidthGap = "mr-12"; // 48px
+    const tileHeightGap = "mb-[72px]"; // 72px
 
     if (position === 'left') {
-      // MODIFIED: 調整 meldsDisplay 和 handDisplay 的順序
-      return <div className={`flex flex-col-reverse items-center justify-start space-y-2 ${scrollableClasses} h-full w-full p-1`}>{meldsDisplay}{handDisplay}</div>;
+      // 左方玩家：手牌區 (最上方視覺)，摸牌區 (中)，面子區 (最下方視覺)
+      // 容器垂直排列，內容水平居中
+      return (
+        <div className={`${mainContentContainerClasses} flex-col justify-start`}>
+          {handDisplayContainer && <div className={`${drawnTileDisplayElement || meldsDisplay ? tileHeightGap : ''}`}>{handDisplayContainer}</div>}
+          {drawnTileDisplayElement && <div className={`${meldsDisplay ? tileHeightGap : ''}`}>{drawnTileDisplayElement}</div>}
+          {meldsDisplay}
+        </div>
+      );
     } else if (position === 'right') {
-      return <div className={`flex flex-col items-center justify-start space-y-2 ${scrollableClasses} h-full w-full p-1`}>{meldsDisplay}{handDisplay}</div>;
-    } else if (position === 'bottom') {
-      return <div className={`flex flex-col items-center justify-center w-full h-full p-1 space-y-1 ${scrollableClasses}`}>{meldsDisplay}{handDisplay}</div>;
-    } else { // top
-      return <div className={`flex flex-col items-center justify-center w-full h-full p-1 space-y-1 ${scrollableClasses}`}>{handDisplay}{meldsDisplay}</div>;
+      // 右方玩家：面子區 (最上方視覺)，摸牌區 (中)，手牌區 (最下方視覺)
+      // 容器垂直排列，內容水平居中
+      return (
+        <div className={`${mainContentContainerClasses} flex-col justify-start`}>
+          {meldsDisplay && <div className={`${drawnTileDisplayElement || handDisplayContainer ? tileHeightGap : ''}`}>{meldsDisplay}</div>}
+          {drawnTileDisplayElement && <div className={`${handDisplayContainer ? tileHeightGap : ''}`}>{drawnTileDisplayElement}</div>}
+          {handDisplayContainer}
+        </div>
+      );
+    } else if (position === 'top') {
+      // 上方玩家：面子區 (最左方視覺)，摸牌區 (中)，手牌區 (最右方視覺)
+      // 容器水平排列，內容垂直居中
+      return (
+        <div className={`${mainContentContainerClasses} flex-row justify-start`}>
+          {meldsDisplay && <div className={`${drawnTileDisplayElement || handDisplayContainer ? tileWidthGap : ''}`}>{meldsDisplay}</div>}
+          {drawnTileDisplayElement && <div className={`${handDisplayContainer ? tileWidthGap : ''}`}>{drawnTileDisplayElement}</div>}
+          {handDisplayContainer}
+        </div>
+      );
+    } else { // bottom (底部玩家)
+      // 底部玩家：明牌區在手牌區上方。摸牌區由 GameBoard.tsx 單獨處理。
+      return (
+        <div className={`${mainContentContainerClasses} flex-col justify-start space-y-1`}>
+            {meldsDisplay}
+            {handDisplayContainer}
+        </div>
+      );
     }
   };
+
 
   const currentPlayerHighlightClass = isCurrentPlayer && gamePhase !== GamePhase.GAME_OVER && gamePhase !== GamePhase.ROUND_OVER
     ? 'animate-pulse-border-sky bg-sky-800/40 border-2 border-sky-500/80'
@@ -216,8 +323,8 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
   const voiceIconPositionClasses = {
     bottom: 'top-1 -right-1',
     top: 'bottom-1 -left-1',
-    left: 'top-1 -left-1', // 如果是垂直佈局，可能需要調整
-    right: 'top-1 -right-1', // 如果是垂直佈局，可能需要調整
+    left: 'top-1 -left-1', 
+    right: 'top-1 -right-1', 
   };
 
 
@@ -227,7 +334,6 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
       ${currentPlayerHighlightClass}
       ${(position === 'left' || position === 'right') ? 'w-auto flex flex-col items-center' : 'w-full flex flex-row items-stretch'}
     `}>
-      {/* 語音狀態圖示 */}
       <div className={`absolute ${voiceIconPositionClasses[position]} z-20 p-0.5 rounded-full`}>
         {player.isSpeaking && !player.isMuted && (
           <div className="bg-green-500 rounded-full p-0.5 animate-pulse">
@@ -271,3 +377,4 @@ const PlayerDisplay: React.FC<PlayerDisplayProps> = ({
 };
 
 export default PlayerDisplay;
+    
